@@ -5,6 +5,7 @@ include(
 	"auth",
 	"chat",
 	"eventsub-common",
+	"eventsub-websocket",
 	"rest-extensions",
 	"rest-helix",
 	"rest-kraken",
