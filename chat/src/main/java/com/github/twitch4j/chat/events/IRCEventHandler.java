@@ -2,6 +2,7 @@ package com.github.twitch4j.chat.events;
 
 import com.github.philippheuer.events4j.core.EventManager;
 import com.github.twitch4j.chat.TwitchChat;
+import com.github.twitch4j.chat.enums.NoticeTag;
 import com.github.twitch4j.chat.events.channel.*;
 import com.github.twitch4j.chat.events.roomstate.*;
 import com.github.twitch4j.common.enums.SubscriptionPlan;
@@ -60,6 +61,7 @@ public class IRCEventHandler {
         eventManager.onEvent("twitch4j-chat-cheer-trigger", IRCMessageEvent.class, this::onChannelCheer);
         eventManager.onEvent("twitch4j-chat-sub-trigger", IRCMessageEvent.class, this::onChannelSubscription);
         eventManager.onEvent("twitch4j-chat-clearchat-trigger", IRCMessageEvent.class, this::onClearChat);
+        eventManager.onEvent("twitch4j-chat-clearmsg-trigger", IRCMessageEvent.class, this::onClearMsg);
         eventManager.onEvent("twitch4j-chat-join-trigger", IRCMessageEvent.class, this::onChannnelClientJoinEvent);
         eventManager.onEvent("twitch4j-chat-leave-trigger", IRCMessageEvent.class, this::onChannnelClientLeaveEvent);
         eventManager.onEvent("twitch4j-chat-mod-trigger", IRCMessageEvent.class, this::onChannelModChange);
@@ -75,7 +77,6 @@ public class IRCEventHandler {
         eventManager.onEvent("twitch4j-chat-raid-trigger", IRCMessageEvent.class, this::onRaid);
         eventManager.onEvent("twitch4j-chat-unraid-trigger", IRCMessageEvent.class, this::onUnraid);
         eventManager.onEvent("twitch4j-chat-rewardgift-trigger", IRCMessageEvent.class, this::onRewardGift);
-        eventManager.onEvent("twitch4j-chat-ritual-trigger", IRCMessageEvent.class, this::onRitual);
         eventManager.onEvent("twitch4j-chat-delete-trigger", IRCMessageEvent.class, this::onMessageDeleteResponse);
         eventManager.onEvent("twitch4j-chat-userstate-trigger", IRCMessageEvent.class, this::onUserState);
         eventManager.onEvent("twitch4j-chat-globaluserstate-trigger", IRCMessageEvent.class, this::onGlobalUserState);
@@ -91,14 +92,15 @@ public class IRCEventHandler {
                 // Load Info
                 EventChannel channel = event.getChannel();
                 EventUser user = event.getUser();
+                String message = event.getMessage().get();
 
                 // Dispatch Event
-                if(event.getMessage().get().startsWith("\u0001ACTION ")) {
+                if (message.startsWith("\u0001ACTION ") && message.endsWith("\u0001")) {
                     // Action
-                    eventManager.publish(new ChannelMessageActionEvent(channel, event, user, event.getMessage().get().substring(8), event.getClientPermissions()));
+                    eventManager.publish(new ChannelMessageActionEvent(channel, event, user, message.substring(8, message.length() - 1), event.getClientPermissions()));
                 } else {
                     // Regular Message
-                    eventManager.publish(new ChannelMessageEvent(channel, event, user, event.getMessage().get(), event.getClientPermissions()));
+                    eventManager.publish(new ChannelMessageEvent(channel, event, user, message, event.getClientPermissions()));
                 }
             }
         }
@@ -153,7 +155,7 @@ public class IRCEventHandler {
                 int subTier = event.getSubscriptionTier().orElse(0);
 
                 // Dispatch Event
-                eventManager.publish(new CheerEvent(channel, user != null ? user : ANONYMOUS_CHEERER, message, bits, subMonths, subTier, event.getFlags()));
+                eventManager.publish(new CheerEvent(event, channel, user != null ? user : ANONYMOUS_CHEERER, message, bits, subMonths, subTier, event.getFlags()));
             }
         }
     }
@@ -190,7 +192,7 @@ public class IRCEventHandler {
                 Integer multiMonthTenure = Integer.parseInt(event.getTags().getOrDefault("msg-param-multimonth-tenure", "0"));
 
                 // Dispatch Event
-                eventManager.publish(new SubscriptionEvent(channel, user, subPlan, event.getMessage(), cumulativeMonths, false, null, streak, null, multiMonthDuration, multiMonthTenure, event.getFlags()));
+                eventManager.publish(new SubscriptionEvent(event, channel, user, subPlan, event.getMessage(), cumulativeMonths, false, null, streak, null, multiMonthDuration, multiMonthTenure, event.getFlags()));
             }
             // Receive Gifted Sub
             else if (msgId.equalsIgnoreCase("subgift") || msgId.equalsIgnoreCase("anonsubgift")) {
@@ -213,7 +215,7 @@ public class IRCEventHandler {
                 Integer multiMonthTenure = StringUtils.isEmpty(multiTenureParam) ? null : Integer.parseInt(multiTenureParam);
 
                 // Dispatch Event
-                eventManager.publish(new SubscriptionEvent(channel, user, subPlan, event.getMessage(), subStreak, true, giftedBy != null ? giftedBy : ANONYMOUS_GIFTER, 0, giftMonths, giftMonths, multiMonthTenure, event.getFlags()));
+                eventManager.publish(new SubscriptionEvent(event, channel, user, subPlan, event.getMessage(), subStreak, true, giftedBy != null ? giftedBy : ANONYMOUS_GIFTER, 0, giftMonths, giftMonths, multiMonthTenure, event.getFlags()));
             }
             // Gift X Subs
             else if (msgId.equalsIgnoreCase("submysterygift") || msgId.equalsIgnoreCase("anonsubmysterygift")) {
@@ -377,7 +379,10 @@ public class IRCEventHandler {
      * ChatChannel Ritual Event Parser: celebration of a shared viewer milestone
      *
      * @param event the {@link IRCMessageEvent} to be checked
+     * @see <a href="https://twitter.com/TwitchSupport/status/1481008324502073347">Shut down announcement</a>
+     * @deprecated no longer sent by twitch.
      */
+    @Deprecated
     public void onRitual(IRCMessageEvent event) {
         if ("USERNOTICE".equals(event.getCommandType()) && "ritual".equalsIgnoreCase(event.getTags().get("msg-id"))) {
             // Load Info
@@ -421,6 +426,24 @@ public class IRCEventHandler {
             } else { // Clear chat event
                 eventManager.publish(new ClearChatEvent(channel));
             }
+        }
+    }
+
+    /**
+     * A single message was deleted in a channel by a moderator
+     *
+     * @param event IRCMessageEvent
+     * @see <a href="https://dev.twitch.tv/docs/irc/tags#clearmsg-twitch-tags">Official documentation</a>
+     */
+    public void onClearMsg(IRCMessageEvent event) {
+        if ("CLEARMSG".equals(event.getCommandType())) {
+            EventChannel channel = event.getChannel();
+            String userName = event.getUserName();
+            String msgId = event.getTagValue("target-msg-id").orElse(null);
+            String message = event.getMessage().orElse("");
+            boolean wasActionMessage = message.startsWith("\u0001ACTION ") && message.endsWith("\u0001");
+            String trimmedMsg = wasActionMessage ? message.substring("\u0001ACTION ".length(), message.length() - "\u0001".length()) : message;
+            eventManager.publish(new DeleteMessageEvent(channel, userName, msgId, trimmedMsg, wasActionMessage));
         }
     }
 
@@ -491,7 +514,7 @@ public class IRCEventHandler {
             EventChannel channel = event.getChannel();
             String messageId = event.getTagValue("msg-id").get();
 
-            if(messageId.equals("host_on")) {
+            if (messageId.equals(NoticeTag.HOST_ON.toString())) {
                 String message = event.getMessage().get();
                 String targetChannelName = message.substring(12, message.length() - 1);
                 EventChannel targetChannel = new EventChannel(null, targetChannelName);
@@ -505,7 +528,7 @@ public class IRCEventHandler {
             EventChannel channel = event.getChannel();
             String messageId = event.getTagValue("msg-id").get();
 
-            if(messageId.equals("host_off")) {
+            if (messageId.equals(NoticeTag.HOST_OFF.toString())) {
                 eventManager.publish(new HostOffEvent(channel));
             }
         }
@@ -524,14 +547,14 @@ public class IRCEventHandler {
     }
 
     public void onListModsEvent(IRCMessageEvent event) {
-        if ("NOTICE".equals(event.getCommandType()) && event.getTagValue("msg-id").filter(s -> s.equals("room_mods") || s.equals("no_mods")).isPresent()) {
+        if ("NOTICE".equals(event.getCommandType()) && event.getTagValue("msg-id").filter(s -> s.equals(NoticeTag.ROOM_MODS.toString()) || s.equals(NoticeTag.NO_MODS.toString())).isPresent()) {
             List<String> names = extractItemsFromDelimitedList(event.getMessage(), "The moderators of this channel are: ", ", ");
             eventManager.publish(new ListModsEvent(event.getChannel(), names));
         }
     }
 
     public void onListVipsEvent(IRCMessageEvent event) {
-        if ("NOTICE".equals(event.getCommandType()) && event.getTagValue("msg-id").filter(s -> s.equals("vips_success") || s.equals("no_vips")).isPresent()) {
+        if ("NOTICE".equals(event.getCommandType()) && event.getTagValue("msg-id").filter(s -> s.equals(NoticeTag.VIPS_SUCCESS.toString()) || s.equals(NoticeTag.NO_VIPS.toString())).isPresent()) {
             List<String> names = extractItemsFromDelimitedList(event.getMessage(), "The VIPs of this channel are: ", ", ");
             eventManager.publish(new ListVipsEvent(event.getChannel(), names));
         }
@@ -565,6 +588,10 @@ public class IRCEventHandler {
                             states.put(ChannelStateEvent.ChannelState.R9K, uniqActive);
                             eventManager.publish(new Robot9000Event(channel, uniqActive));
                             break;
+                        case "rituals":
+                            boolean ritualsActive = "1".equals(v);
+                            states.put(ChannelStateEvent.ChannelState.RITUALS, ritualsActive);
+                            break;
                         case "slow":
                             long slowDelay = Long.parseLong(v);
                             states.put(ChannelStateEvent.ChannelState.SLOW, slowDelay);
@@ -587,11 +614,12 @@ public class IRCEventHandler {
     public void onMessageDeleteResponse(IRCMessageEvent event) {
         if (event.getCommandType().equals("NOTICE")) {
             EventChannel channel = event.getChannel();
-            String messageId = event.getTagValue("msg-id").get();
+            String messageId = event.getTagValue("msg-id").orElse(null);
+            NoticeTag tag = NoticeTag.parse(messageId);
 
-            if (messageId.equals("delete_message_success")) {
+            if (tag == NoticeTag.DELETE_MESSAGE_SUCCESS) {
                 eventManager.publish(new MessageDeleteSuccess(channel));
-            } else if (messageId.equals("bad_delete_message_error")) {
+            } else if (tag == NoticeTag.BAD_DELETE_MESSAGE_ERROR || tag == NoticeTag.BAD_DELETE_MESSAGE_BROADCASTER || tag == NoticeTag.BAD_DELETE_MESSAGE_MOD) {
                 eventManager.publish(new MessageDeleteError(channel));
                 log.warn("Failed to delete a message in {}!", channel.getName());
             }

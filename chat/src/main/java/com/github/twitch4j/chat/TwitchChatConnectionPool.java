@@ -1,11 +1,15 @@
 package com.github.twitch4j.chat;
 
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
+import com.github.twitch4j.chat.enums.NoticeTag;
+import com.github.twitch4j.chat.events.channel.ChannelJoinFailureEvent;
 import com.github.twitch4j.chat.events.channel.ChannelNoticeEvent;
 import com.github.twitch4j.chat.events.channel.IRCMessageEvent;
+import com.github.twitch4j.chat.util.TwitchChatLimitHelper;
 import com.github.twitch4j.common.annotation.Unofficial;
 import com.github.twitch4j.common.pool.TwitchModuleConnectionPool;
 import com.github.twitch4j.common.util.ChatReply;
+import io.github.bucket4j.Bandwidth;
 import lombok.Builder;
 import lombok.NonNull;
 import lombok.experimental.SuperBuilder;
@@ -60,12 +64,39 @@ public class TwitchChatConnectionPool extends TwitchModuleConnectionPool<TwitchC
      * Whether chat connections should automatically part from channels they have been banned from.
      * This is useful for reclaiming subscription headroom so a minimal number of chat instances are running.
      * By default false so that a chat instance can (eventually) reconnect if a unban occurs.
+     *
+     * @deprecated use removeChannelOnJoinFailure via advancedConfiguration instead.
      */
+    @Deprecated
     @Builder.Default
     protected final boolean automaticallyPartOnBan = false;
 
+    /**
+     * Custom RateLimit for ChatMessages
+     */
+    @Builder.Default
+    protected Bandwidth chatRateLimit = TwitchChatLimitHelper.USER_MESSAGE_LIMIT;
+
+    /**
+     * Custom RateLimit for Whispers
+     */
+    @Builder.Default
+    protected Bandwidth[] whisperRateLimit = TwitchChatLimitHelper.USER_WHISPER_LIMIT.toArray(new Bandwidth[2]);
+
+    /**
+     * Custom RateLimit for JOIN/PART
+     */
+    @Builder.Default
+    protected Bandwidth joinRateLimit = TwitchChatLimitHelper.USER_JOIN_LIMIT;
+
+    /**
+     * Custom RateLimit for AUTH
+     */
+    @Builder.Default
+    protected Bandwidth authRateLimit = TwitchChatLimitHelper.USER_AUTH_LIMIT;
+
     @Override
-    public boolean sendMessage(String channel, String message, @Unofficial @Nullable Map<String, Object> tags) {
+    public boolean sendMessage(String channel, String message, @Nullable Map<String, Object> tags) {
         return this.sendMessage(channel, channel, message, tags);
     }
 
@@ -91,8 +122,7 @@ public class TwitchChatConnectionPool extends TwitchModuleConnectionPool<TwitchC
      * @param replyMsgId                    the msgId of the parent message being replied to (optional).
      * @return whether a {@link TwitchChat} instance was found and used to send the message
      */
-    @Unofficial
-    public boolean sendMessage(final String channelToIdentifyChatInstance, final String targetChannel, final String message, final String nonce, final String replyMsgId) {
+    public boolean sendMessage(final String channelToIdentifyChatInstance, final String targetChannel, final String message, @Unofficial final String nonce, final String replyMsgId) {
         final Map<String, Object> tags = new LinkedHashMap<>();
         if (nonce != null) tags.put(IRCMessageEvent.NONCE_TAG_NAME, nonce);
         if (replyMsgId != null) tags.put(ChatReply.REPLY_MSG_ID_TAG_NAME, replyMsgId);
@@ -105,10 +135,10 @@ public class TwitchChatConnectionPool extends TwitchModuleConnectionPool<TwitchC
      * @param channelToIdentifyChatInstance the channel used to identify which {@link TwitchChat} instance should be used to send the message; the instance must be subscribed to this channel.
      * @param targetChannel                 the channel to send the message to, if not null (otherwise it is sent directly on the socket).
      * @param message                       the message to be sent.
-     * @param tags                          the message tags (unofficial).
+     * @param tags                          the message tags.
      * @return whether a {@link TwitchChat} instance was found and used to send the message
      */
-    public boolean sendMessage(String channelToIdentifyChatInstance, String targetChannel, String message, @Unofficial @Nullable Map<String, Object> tags) {
+    public boolean sendMessage(String channelToIdentifyChatInstance, String targetChannel, String message, @Nullable Map<String, Object> tags) {
         if (channelToIdentifyChatInstance == null)
             return false;
 
@@ -222,12 +252,19 @@ public class TwitchChatConnectionPool extends TwitchModuleConnectionPool<TwitchC
                 .withEventManager(getConnectionEventManager())
                 .withScheduledThreadPoolExecutor(getExecutor(threadPrefix + RandomStringUtils.random(4, true, true), TwitchChat.REQUIRED_THREAD_COUNT))
                 .withProxyConfig(proxyConfig.get())
+                .withChatRateLimit(chatRateLimit)
+                .withWhisperRateLimit(whisperRateLimit)
+                .withJoinRateLimit(joinRateLimit)
+                .withAuthRateLimit(authRateLimit)
                 .withAutoJoinOwnChannel(false) // user will have to manually send a subscribe call to enable whispers. this avoids duplicating whisper events
         ).build();
 
+        // Reclaim channel headroom upon generic join failures
+        chat.getEventManager().onEvent(threadPrefix + "join-fail-tracker", ChannelJoinFailureEvent.class, e -> unsubscribe(e.getChannelName()));
+
         // Reclaim channel headroom upon a ban
-        chat.getEventManager().onEvent("twitch4j-chat-pool-ban-tracker", ChannelNoticeEvent.class, e -> {
-            if (automaticallyPartOnBan && "msg_banned".equals(e.getMsgId())) {
+        chat.getEventManager().onEvent(threadPrefix + "ban-tracker", ChannelNoticeEvent.class, e -> {
+            if (automaticallyPartOnBan && NoticeTag.MSG_BANNED.toString().equals(e.getMsgId())) {
                 unsubscribe(e.getChannel().getName());
             }
         });
@@ -239,6 +276,20 @@ public class TwitchChatConnectionPool extends TwitchModuleConnectionPool<TwitchC
     @Override
     protected void disposeConnection(TwitchChat connection) {
         connection.close();
+    }
+
+    @Override
+    public long getLatency() {
+        long sum = 0;
+        int count = 0;
+        for (TwitchChat connection : getConnections()) {
+            final long latency = connection.getLatency();
+            if (latency > 0) {
+                sum += latency;
+                count++;
+            }
+        }
+        return count > 0 ? sum / count : -1L;
     }
 
     /**

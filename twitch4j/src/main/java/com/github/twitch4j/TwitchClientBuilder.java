@@ -9,6 +9,8 @@ import com.github.philippheuer.events4j.simple.SimpleEventHandler;
 import com.github.twitch4j.auth.TwitchAuth;
 import com.github.twitch4j.chat.TwitchChat;
 import com.github.twitch4j.chat.TwitchChatBuilder;
+import com.github.twitch4j.chat.util.TwitchChatLimitHelper;
+import com.github.twitch4j.common.annotation.Unofficial;
 import com.github.twitch4j.common.config.ProxyConfig;
 import com.github.twitch4j.common.config.Twitch4JGlobal;
 import com.github.twitch4j.common.util.EventManagerUtils;
@@ -32,7 +34,6 @@ import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.RandomStringUtils;
 
-import java.time.Duration;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
@@ -123,7 +124,7 @@ public class TwitchClientBuilder {
     /**
      * IRC Command Handlers
      */
-    protected final Set<String> commandPrefixes = new HashSet<>();
+    protected Set<String> commandPrefixes = new HashSet<>();
 
     /**
      * Enabled: PubSub
@@ -133,8 +134,11 @@ public class TwitchClientBuilder {
 
     /**
      * Enabled: GraphQL
+     * <p>
+     * This is an unofficial API that is not intended for third-party use. Use at your own risk. Methods could change or stop working at any time.
      */
     @With
+    @Unofficial
     private Boolean enableGraphQL = false;
 
     /**
@@ -165,7 +169,25 @@ public class TwitchClientBuilder {
      * Custom RateLimit for ChatMessages
      */
     @With
-    protected Bandwidth chatRateLimit = Bandwidth.simple(20, Duration.ofSeconds(30));
+    protected Bandwidth chatRateLimit = TwitchChatLimitHelper.USER_MESSAGE_LIMIT;
+
+    /**
+     * Custom RateLimit for Whispers
+     */
+    @With
+    protected Bandwidth[] chatWhisperLimit = TwitchChatLimitHelper.USER_WHISPER_LIMIT.toArray(new Bandwidth[2]);
+
+    /**
+     * Custom RateLimit for JOIN/PART
+     */
+    @With
+    protected Bandwidth chatJoinLimit = TwitchChatLimitHelper.USER_JOIN_LIMIT;
+
+    /**
+     * Custom RateLimit for AUTH
+     */
+    @With
+    protected Bandwidth chatAuthLimit = TwitchChatLimitHelper.USER_AUTH_LIMIT;
 
     /**
      * Wait time for taking items off chat queue in milliseconds. Default recommended
@@ -174,12 +196,30 @@ public class TwitchClientBuilder {
     private long chatQueueTimeout = 1000L;
 
     /**
+     * The maximum number of retries to make for joining each channel, with exponential backoff.
+     * Set to zero or a negative value to disable this feature.
+     */
+    @With
+    private int chatMaxJoinRetries = 7;
+
+    /**
      * Sets the default server used for chat
      * <p>
      * Defaults to TwitchChat.TWITCH_WEB_SOCKET_SERVER, you can use TwitchChat.FDGT_TEST_SOCKET_SERVER for testing
      */
     @With
     private String chatServer = TwitchChat.TWITCH_WEB_SOCKET_SERVER;
+
+    /**
+     * The base URL to use for Helix API calls.
+     * <p>
+     * Can be adjusted to point to the <a href="https://dev.twitch.tv/docs/cli/mock-api-command">Twitch CLI Mock API</a>, for example.
+     *
+     * @see TwitchHelixBuilder#OFFICIAL_BASE_URL
+     * @see TwitchHelixBuilder#MOCK_BASE_URL
+     */
+    @With
+    private String helixBaseUrl = TwitchHelixBuilder.OFFICIAL_BASE_URL;
 
     /**
      * CredentialManager
@@ -200,10 +240,16 @@ public class TwitchClientBuilder {
     private long helperThreadDelay = 10000L;
 
     /**
-     * Default Auth Token for API Requests
+     * Default Auth Token for Helix API Requests
      */
     @With
     private OAuth2Credential defaultAuthToken = null;
+
+    /**
+     * Default First-Party OAuth Token for GraphQL calls
+     */
+    @With
+    private OAuth2Credential defaultFirstPartyToken = null;
 
     /**
      * Proxy Configuration
@@ -216,6 +262,12 @@ public class TwitchClientBuilder {
      */
     @With
     private Logger.Level feignLogLevel = Logger.Level.NONE;
+
+    /**
+     * WebSocket RFC Ping Period in ms (0 = disabled)
+     */
+    @With
+    private int wsPingPeriod = 15_000;
 
     /**
      * With a Bot Owner's User ID
@@ -289,7 +341,7 @@ public class TwitchClientBuilder {
             log.warn("Twitch4J requires a scheduledThreadPoolExecutor with at least {} threads to be fully functional! Some features may not work as expected.", poolSize);
         }
         if (scheduledThreadPoolExecutor == null) {
-            scheduledThreadPoolExecutor = ThreadUtils.getDefaultScheduledThreadPoolExecutor("twitch4j-"+ RandomStringUtils.random(4, true, true), poolSize);
+            scheduledThreadPoolExecutor = ThreadUtils.getDefaultScheduledThreadPoolExecutor("twitch4j-" + RandomStringUtils.random(4, true, true), poolSize);
         }
 
         // Module: Extensions
@@ -310,6 +362,7 @@ public class TwitchClientBuilder {
         TwitchHelix helix = null;
         if (this.enableHelix) {
             helix = TwitchHelixBuilder.builder()
+                .withBaseUrl(helixBaseUrl)
                 .withClientId(clientId)
                 .withClientSecret(clientSecret)
                 .withUserAgent(userAgent)
@@ -359,12 +412,17 @@ public class TwitchClientBuilder {
                 .withChatAccount(chatAccount)
                 .withChatQueueSize(chatQueueSize)
                 .withChatRateLimit(chatRateLimit)
+                .withWhisperRateLimit(chatWhisperLimit)
+                .withJoinRateLimit(chatJoinLimit)
+                .withAuthRateLimit(chatAuthLimit)
                 .withScheduledThreadPoolExecutor(scheduledThreadPoolExecutor)
                 .withBaseUrl(chatServer)
                 .withChatQueueTimeout(chatQueueTimeout)
-                .withCommandTriggers(commandPrefixes)
                 .withProxyConfig(proxyConfig)
+                .withMaxJoinRetries(chatMaxJoinRetries)
                 .setBotOwnerIds(botOwnerIds)
+                .setCommandPrefixes(commandPrefixes)
+                .withWsPingPeriod(wsPingPeriod)
                 .build();
         }
 
@@ -376,6 +434,7 @@ public class TwitchClientBuilder {
                 .withScheduledThreadPoolExecutor(scheduledThreadPoolExecutor)
                 .withProxyConfig(proxyConfig)
                 .setBotOwnerIds(botOwnerIds)
+                .withWsPingPeriod(wsPingPeriod)
                 .build();
         }
 
@@ -384,9 +443,9 @@ public class TwitchClientBuilder {
         if (this.enableGraphQL) {
             graphql = TwitchGraphQLBuilder.builder()
                 .withEventManager(eventManager)
-                .withClientId(clientId)
-                .withClientSecret(clientSecret)
+                .withDefaultFirstPartyToken(defaultFirstPartyToken)
                 .withProxyConfig(proxyConfig)
+                .withTimeout(timeout)
                 .build();
         }
 

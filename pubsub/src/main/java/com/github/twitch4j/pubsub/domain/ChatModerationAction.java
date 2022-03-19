@@ -1,8 +1,10 @@
 package com.github.twitch4j.pubsub.domain;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 import java.util.Arrays;
 import java.util.List;
@@ -13,6 +15,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Data
+@NoArgsConstructor
+@AllArgsConstructor
 public class ChatModerationAction {
 
     /**
@@ -199,6 +203,10 @@ public class ChatModerationAction {
          * User time out was removed
          */
         UNTIMEOUT,
+        /**
+         * The recent chat history was wiped
+         */
+        CLEAR,
         /**
          * Chat message was deleted
          */

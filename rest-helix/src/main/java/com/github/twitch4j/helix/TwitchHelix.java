@@ -1,5 +1,7 @@
 package com.github.twitch4j.helix;
 
+import com.github.twitch4j.common.annotation.Unofficial;
+import com.github.twitch4j.common.feign.JsonStringExpander;
 import com.github.twitch4j.common.feign.ObjectToJsonExpander;
 import com.github.twitch4j.eventsub.EventSubSubscription;
 import com.github.twitch4j.eventsub.EventSubSubscriptionStatus;
@@ -101,6 +103,40 @@ public interface TwitchHelix {
     HystrixCommand<CheermoteList> getCheermotes(
         @Param("token") String authToken,
         @Param("broadcaster_id") String broadcasterId
+    );
+
+    /**
+     * Gets a list of Bits products that belongs to an Extension.
+     *
+     * @param authToken  App Access Token associated with the Extension client ID
+     * @param includeAll Optional: Whether Bits products that are disabled/expired should be included in the response. Default: false
+     * @return ExtensionBitsProductList
+     */
+    @RequestLine("GET /bits/extensions?should_include_all={should_include_all}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<ExtensionBitsProductList> getExtensionBitsProducts(
+        @Param("token") String authToken,
+        @Param("should_include_all") Boolean includeAll
+    );
+
+    /**
+     * Add or update a Bits products that belongs to an Extension.
+     * <p>
+     * Required body fields: sku, cost.amount, cost.type, display_name.
+     * Optional fields: in_development, expiration, is_broadcast.
+     *
+     * @param authToken App Access Token associated with the Extension client ID
+     * @param product   The extension bits product to add or update
+     * @return ExtensionBitsProductList
+     */
+    @RequestLine("PUT /bits/extensions")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<ExtensionBitsProductList> updateExtensionBitsProduct(
+        @Param("token") String authToken,
+        ExtensionBitsProduct product
     );
 
     /**
@@ -356,6 +392,45 @@ public interface TwitchHelix {
     );
 
     /**
+     * Gets the broadcaster’s chat settings.
+     *
+     * @param authToken     Required: OAuth access token. To read the non-moderator chat delay, a moderator's user access token must be specified with the moderator:read:chat_settings scope.
+     * @param broadcasterId Required: The ID of the broadcaster whose chat settings you want to get.
+     * @param moderatorId   Optional: The ID of a user that has permission to moderate the broadcaster’s chat room. Required only to access non moderator chat delay fields.
+     * @return ChatSettingsWrapper
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_CHAT_SETTINGS_READ
+     */
+    @RequestLine("GET /chat/settings?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<ChatSettingsWrapper> getChatSettings(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId
+    );
+
+    /**
+     * Updates the broadcaster’s chat settings.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:chat_settings, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster whose chat settings you want to update.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param chatSettings  Required: The chat settings that you want to update.
+     * @return ChatSettingsWrapper
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_CHAT_SETTINGS_MANAGE
+     */
+    @RequestLine("PATCH /chat/settings?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<ChatSettingsWrapper> updateChatSettings(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        ChatSettings chatSettings
+    );
+
+    /**
      * Gets the status of one or more provided codes.
      * <p>
      * The API is throttled to one request per second per authenticated user.
@@ -408,19 +483,50 @@ public interface TwitchHelix {
      * @param id        Optional: Unique Identifier of the entitlement.
      * @param userId    Optional: A Twitch User ID.
      * @param gameId    Optional: A Twitch Game ID.
+     * @param status    Optional: Fulfillment status used to filter entitlements.
      * @param after     Optional: The cursor used to fetch the next page of data.
      * @param limit     Optional: Maximum number of entitlements to return. Default: 20. Max: 1000.
      * @return DropsEntitlementList
      */
-    @RequestLine("GET /entitlements/drops?id={id}&user_id={user_id}&game_id={game_id}&after={after}&first={first}")
+    @RequestLine("GET /entitlements/drops?id={id}&user_id={user_id}&game_id={game_id}&fulfillment_status={fulfillment_status}&after={after}&first={first}")
     @Headers("Authorization: Bearer {token}")
     HystrixCommand<DropsEntitlementList> getDropsEntitlements(
         @Param("token") String authToken,
         @Param("id") String id,
         @Param("user_id") String userId,
         @Param("game_id") String gameId,
+        @Param("fulfillment_status") DropFulfillmentStatus status,
         @Param("after") String after,
         @Param("first") Integer limit
+    );
+
+    @Deprecated
+    default HystrixCommand<DropsEntitlementList> getDropsEntitlements(
+        @Param("token") String authToken,
+        @Param("id") String id,
+        @Param("user_id") String userId,
+        @Param("game_id") String gameId,
+        @Param("after") String after,
+        @Param("first") Integer limit
+    ) {
+        return getDropsEntitlements(authToken, id, userId, gameId, null, after, limit);
+    }
+
+    /**
+     * Updates the fulfillment status on a set of Drops entitlements, specified by their entitlement IDs.
+     *
+     * @param authToken User OAuth Token or App Access Token where the client ID associated with the access token must have ownership of the game.
+     * @param input     The fulfillment_status to assign to each of the entitlement_ids.
+     * @return UpdatedDropEntitlementsList
+     */
+    @RequestLine("PATCH /entitlements/drops")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<UpdatedDropEntitlementsList> updateDropsEntitlements(
+        @Param("token") String authToken,
+        UpdateDropEntitlementInput input
     );
 
     /**
@@ -473,6 +579,246 @@ public interface TwitchHelix {
     );
 
     /**
+     * Gets information about your Extensions; either the current version or a specified version.
+     *
+     * @param jwtToken         Signed JWT with role set to "external".
+     * @param extensionId      ID of the Extension.
+     * @param extensionVersion The specific version of the Extension to return. If not provided, the current version is returned.
+     * @return ReleasedExtensionList
+     */
+    @RequestLine("GET /extensions?extension_id={extension_id}&extension_version={extension_version}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}"
+    })
+    HystrixCommand<ReleasedExtensionList> getExtensions(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        @Param("extension_version") String extensionVersion
+    );
+
+    /**
+     * Sends a specified chat message to a specified channel.
+     * <p>
+     * The message will appear in the channel’s chat as a normal message.
+     * The “username” of the message is the Extension name.
+     * <p>
+     * There is a limit of 12 messages per minute, per channel.
+     *
+     * @param jwtToken         Signed JWT with user_id and role (set to "external").
+     * @param extensionId      Client ID associated with the Extension.
+     * @param extensionVersion Version of the Extension sending this message.
+     * @param broadcasterId    User ID of the broadcaster whose channel has the Extension activated.
+     * @param text             Message for Twitch chat. Maximum: 280 characters.
+     * @return 204 No Content upon a successful request
+     */
+    @RequestLine("POST /extensions/chat?broadcaster_id={broadcaster_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}",
+        "Content-Type: application/json"
+    })
+    @Body("%7B\"extension_id\":\"{extension_id}\",\"extension_version\":\"{extension_version}\",\"text\":\"{text}\"%7D")
+    HystrixCommand<Void> sendExtensionChatMessage(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        @Param("extension_version") String extensionVersion,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("text") String text
+    );
+
+    /**
+     * Gets the specified configuration segment from the specified extension.
+     * <p>
+     * You can retrieve each segment a maximum of 20 times per minute.
+     * If you exceed the limit, the request returns HTTP status code 429.
+     *
+     * @param jwtToken      Signed JWT with exp, user_id, and role (set to "external").
+     * @param extensionId   The ID of the extension that contains the configuration segment you want to get.
+     * @param segment       The type of configuration segment to get.
+     * @param broadcasterId The ID of the broadcaster for the configuration returned. This parameter is required if you set the segment parameter to broadcaster or developer. Do not specify this parameter if you set segment to global.
+     * @return ExtensionConfigurationSegmentList
+     */
+    @RequestLine("GET /extensions/configurations?broadcaster_id={broadcaster_id}&extension_id={extension_id}&segment={segment}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}"
+    })
+    HystrixCommand<ExtensionConfigurationSegmentList> getExtensionConfigurationSegment(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        @Param("segment") List<ExtensionSegment> segment,
+        @Param("broadcaster_id") String broadcasterId
+    );
+
+    /**
+     * Sets a single configuration segment of any type.
+     * <p>
+     * Each segment is limited to 5 KB and can be set at most 20 times per minute.
+     * Updates to this data are not delivered to Extensions that have already been rendered.
+     *
+     * @param jwtToken    Signed JWT with exp, user_id, and role (set to "external").
+     * @param extensionId ID for the Extension which the configuration is for.
+     * @param input       Segment configuration info.
+     * @return 204 No Content upon a successful request.
+     */
+    @RequestLine("PUT /extensions/configurations")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<Void> setExtensionConfigurationSegment(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        ExtensionConfigurationSegmentInput input
+    );
+
+    /**
+     * Retrieves a specified Extension’s secret data consisting of a version and an array of secret objects.
+     * <p>
+     * Each secret object contains a base64-encoded secret, a UTC timestamp when the secret becomes active, and a timestamp when the secret expires.
+     * <p>
+     * Signed JWT created by an Extension Backend Service (EBS), following the requirements documented in Signing the JWT.
+     * A signed JWT must include the exp, user_id, and role fields documented in JWT Schema, and role must be set to "external".
+     *
+     * @param jwtToken    Signed JWT with exp, user_id, and role (set to "external").
+     * @param extensionId The Client ID associated with the extension.
+     * @return ExtensionSecretsList
+     */
+    @RequestLine("GET /extensions/jwt/secrets?extension_id={extension_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}"
+    })
+    HystrixCommand<ExtensionSecretsList> getExtensionSecrets(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId
+    );
+
+    /**
+     * Creates a JWT signing secret for a specific Extension.
+     * <p>
+     * Also rotates any current secrets out of service, with enough time for instances of the Extension to gracefully switch over to the new secret.
+     * Use this function only when you are ready to install the new secret it returns.
+     *
+     * @param jwtToken    Signed JWT with exp, user_id, and role (set to "external").
+     * @param extensionId The Client ID associated with the extension.
+     * @param delay       Optional: JWT signing activation delay for the newly created secret in seconds. Minimum: 300. Default: 300.
+     * @return ExtensionSecretsList
+     */
+    @RequestLine("POST /extensions/jwt/secrets?extension_id={extension_id}&delay={delay}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}"
+    })
+    HystrixCommand<ExtensionSecretsList> createExtensionSecret(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        @Param("delay") Integer delay
+    );
+
+    /**
+     * Returns one page of live channels that have installed or activated a specific Extension,
+     * identified by a client ID value assigned to the Extension when it is created.
+     * <p>
+     * A channel that recently went live may take a few minutes to appear in this list,
+     * and a channel may continue to appear on this list for a few minutes after it stops broadcasting.
+     *
+     * @param authToken   User OAuth Token or App Access Token
+     * @param extensionId ID of the Extension to search for.
+     * @param limit       Maximum number of objects to return. Maximum: 100. Default: 20.
+     * @param after       The cursor used to fetch the next page of data.
+     * @return ExtensionLiveChannelsList
+     */
+    @RequestLine("GET /extensions/live?extension_id={extension_id}&first={first}&after={after}&cursor={after}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<ExtensionLiveChannelsList> getExtensionLiveChannels(
+        @Param("token") String authToken,
+        @Param("extension_id") String extensionId,
+        @Param("first") Integer limit,
+        @Param("after") String after
+    );
+
+    /**
+     * Twitch provides a publish-subscribe system for your EBS to communicate with both the broadcaster and viewers.
+     * Calling this endpoint forwards your message using the same mechanism as the send JavaScript helper function.
+     * <p>
+     * A message can be sent to either a specified channel or globally (all channels on which your extension is active).
+     * <p>
+     * Extension PubSub has a rate limit of 100 requests per minute for a combination of Extension client ID and broadcaster ID.
+     * <p>
+     * A signed JWT must include the channel_id and pubsub_perms fields documented in JWT Schema.
+     *
+     * @param jwtToken    Signed JWT with exp, user_id, role, channel_id, pubsub_perms.send
+     * @param extensionId Client ID associated with the Extension.
+     * @param input       Details on the message to be sent and its targets.
+     * @return 204 No Content upon a successful request.
+     */
+    @RequestLine("POST /extensions/pubsub")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<Void> sendExtensionPubSubMessage(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        SendPubSubMessageInput input
+    );
+
+    /**
+     * Gets information about a released Extension; either the current version or a specified version.
+     *
+     * @param authToken        User OAuth Token or App Access Token
+     * @param extensionId      ID of the Extension.
+     * @param extensionVersion The specific version of the Extension to return. If not provided, the current version is returned.
+     * @return ReleasedExtensionList
+     */
+    @RequestLine("GET /extensions/released?extension_id={extension_id}&extension_version={extension_version}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<ReleasedExtensionList> getReleasedExtensions(
+        @Param("token") String authToken,
+        @Param("extension_id") String extensionId,
+        @Param("extension_version") String extensionVersion
+    );
+
+    /**
+     * Enable activation of a specified Extension, after any required broadcaster configuration is correct.
+     * <p>
+     * This is for Extensions that require broadcaster configuration before activation.
+     * Use this if, in Extension Capabilities, you select Custom/My Own Service.
+     * <p>
+     * You enforce required broadcaster configuration with a required_configuration string in the Extension manifest. The contents of this string can be whatever you want.
+     * Once your EBS determines that the Extension is correctly configured on a channel, use this endpoint to provide that same configuration string, which enables activation on the channel.
+     * The endpoint URL includes the channel ID of the page where the Extension is iframe embedded.
+     * <p>
+     * If a future version of the Extension requires a different configuration, change the required_configuration string in your manifest.
+     * When the new version is released, broadcasters will be required to re-configure that new version.
+     *
+     * @param jwtToken             Signed JWT with exp, user_id, and role (set to "external").
+     * @param extensionId          ID for the Extension to activate.
+     * @param extensionVersion     The version fo the Extension to release.
+     * @param configurationVersion The version of the configuration to use with the Extension.
+     * @param broadcasterId        User ID of the broadcaster who has activated the specified Extension on their channel.
+     * @return 204 No Content upon a successful request.
+     */
+    @RequestLine("PUT /extensions/required_configuration?broadcaster_id={broadcaster_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Client-Id: {extension_id}",
+        "Content-Type: application/json"
+    })
+    @Body("%7B\"extension_id\":\"{extension_id}\",\"extension_version\":\"{extension_version}\",\"required_configuration\":\"{configuration_version}\",\"configuration_version\":\"{configuration_version}\"%7D")
+    HystrixCommand<Void> setExtensionRequiredConfiguration(
+        @Param("token") String jwtToken,
+        @Param("extension_id") String extensionId,
+        @Param("extension_version") String extensionVersion,
+        @Param("configuration_version") String configurationVersion,
+        @Param("broadcaster_id") String broadcasterId
+    );
+
+    /**
      * Get Extension Transactions allows extension back end servers to fetch a list of transactions that have occurred for their extension across all of Twitch.
      *
      * @param authToken App Access  OAuth Token
@@ -514,7 +860,7 @@ public interface TwitchHelix {
      * Gets channel information for users
      *
      * @param authToken Auth Token
-     * @param broadcasterIds IDs of the channels to be retrieved
+     * @param broadcasterIds IDs of the channels to be retrieved (up to 100)
      * @return ChannelInformationList
      */
     @RequestLine("GET /channels?broadcaster_id={broadcaster_id}")
@@ -561,6 +907,51 @@ public interface TwitchHelix {
         @Param("first") Integer limit,
         @Param("after") String after,
         @Param("live_only") Boolean liveOnly
+    );
+
+    /**
+     * Gets the Soundtrack track that the broadcaster is playing.
+     * <p>
+     * If the broadcaster is not playing a track, the endpoint returns HTTP status code 404 Not Found.
+     *
+     * @param authToken     App access token or User access token.
+     * @param broadcasterId The ID of the broadcaster that’s playing a Soundtrack track.
+     * @return SoundtrackCurrentTrackWrapper
+     */
+    @Unofficial // beta
+    @RequestLine("GET /soundtrack/current_track?broadcaster_id={broadcaster_id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<SoundtrackCurrentTrackWrapper> getSoundtrackCurrentTrack(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId
+    );
+
+    /**
+     * Gets a Soundtrack playlist, which includes its list of tracks.
+     *
+     * @param authToken App access token or User access token.
+     * @param id        The ASIN of the Soundtrack playlist to get.
+     * @return SoundtrackPlaylistTracksWrapper
+     */
+    @Unofficial // beta
+    @RequestLine("GET /soundtrack/playlist?id={id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<SoundtrackPlaylistTracksWrapper> getSoundtrackPlaylist(
+        @Param("token") String authToken,
+        @Param("id") String id
+    );
+
+    /**
+     * Gets a list of Soundtrack playlists.
+     *
+     * @param authToken App access token or User access token.
+     * @return SoundtrackPlaylistMetadataList
+     */
+    @Unofficial // beta
+    @RequestLine("GET /soundtrack/playlists")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<SoundtrackPlaylistMetadataList> getSoundtrackPlaylists(
+        @Param("token") String authToken
     );
 
     /**
@@ -677,6 +1068,25 @@ public interface TwitchHelix {
     );
 
     /**
+     * Gets the broadcaster’s list of active goals.
+     * <p>
+     * Use this to get the current progress of each goal.
+     * <p>
+     * NOTE: Although the API currently supports only one goal, you should write your application to support one or more goals.
+     *
+     * @param authToken     User access token from the broadcaster with the channel:read:goals scope.
+     * @param broadcasterId The ID of the broadcaster that created the goals.
+     * @return CreatorGoalsList
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_CHANNEL_GOALS_READ
+     */
+    @RequestLine("GET /goals?broadcaster_id={broadcaster_id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<CreatorGoalsList> getCreatorGoals(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId
+    );
+
+    /**
      * Gets the information of the most recent Hype Train of the given channel ID.
      * After 5 days, if no Hype Train has been active, the endpoint will return an empty response
      *
@@ -737,6 +1147,59 @@ public interface TwitchHelix {
     );
 
     /**
+     * Gets the broadcaster’s AutoMod settings, which are used to automatically block inappropriate or harassing messages from appearing in the broadcaster’s chat room.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:read:automod_settings
+     * @param broadcasterId Required: The ID of the broadcaster whose AutoMod settings you want to get.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @return AutoModSettingsWrapper
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_AUTOMOD_SETTINGS_READ
+     */
+    @RequestLine("GET /moderation/automod/settings?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<AutoModSettingsWrapper> getAutoModSettings(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId
+    );
+
+    /**
+     * Updates the broadcaster’s AutoMod settings, which are used to automatically block inappropriate or harassing messages from appearing in the broadcaster’s chat room.
+     * <p>
+     * You can set either overall_level or the individual settings like aggression, but not both.
+     * <p>
+     * Setting overall_level applies default values to the individual settings. However, setting overall_level to 4 does not mean that it applies 4 to all the individual settings.
+     * Instead, it applies a set of recommended defaults to the rest of the settings.
+     * For example, if you set overall_level to 2, Twitch provides some filtering on discrimination and sexual content, but more filtering on hostility (see the first example response).
+     * <p>
+     * If overall_level is currently set and you update swearing to 3, overall_level will be set to null and all settings other than swearing will be set to 0.
+     * The same is true if individual settings are set and you update overall_level to 3 — all the individual settings are updated to reflect the default level.
+     * <p>
+     * Note that if you set all the individual settings to values that match what overall_level would have set them to, Twitch changes AutoMod to use the default AutoMod level instead of using the individual settings.
+     * <p>
+     * Valid values for all levels are from 0 (no filtering) through 4 (most aggressive filtering).
+     * These levels affect how aggressively AutoMod holds back messages for moderators to review before they appear in chat or are denied (not shown).
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:automod_settings, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster whose AutoMod settings you want to update.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param settings      Required: The AutoMod Settings fields that should be overwritten.
+     * @return AutoModSettingsWrapper
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_AUTOMOD_SETTINGS_MANAGE
+     */
+    @RequestLine("PUT /moderation/automod/settings?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    HystrixCommand<AutoModSettingsWrapper> updateAutoModSettings(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        AutoModSettings settings
+    );
+
+    /**
      * Returns all banned and timed-out users in a channel.
      *
      * @param authToken     Auth Token (scope: moderation:read)
@@ -789,7 +1252,10 @@ public interface TwitchHelix {
      * @param after         Optional: Cursor for forward pagination.
      * @param limit         Optional: Maximum number of objects to return. Maximum: 100. Default: 20.
      * @return BannedEventList
+     * @see <a href="https://discuss.dev.twitch.tv/t/deprecation-of-twitch-api-event-endpoints-that-supported-websub-based-webhooks/35137">Deprecation announcement</a>
+     * @deprecated Will be removed come March 15, 2022, in favor of EventSub and {@link #getBannedUsers(String, String, List, String, String, Integer)}
      */
+    @Deprecated
     @RequestLine("GET /moderation/banned/events?broadcaster_id={broadcaster_id}&user_id={user_id}&after={after}&first={first}")
     @Headers("Authorization: Bearer {token}")
     HystrixCommand<BannedEventList> getBannedEvents(
@@ -798,6 +1264,122 @@ public interface TwitchHelix {
         @Param("user_id") List<String> userId,
         @Param("after") String after,
         @Param("first") Integer limit
+    );
+
+    /**
+     * Bans a user from participating in a broadcaster’s chat room, or puts them in a timeout.
+     * <p>
+     * If the user is currently in a timeout, you can call this endpoint to change the duration of the timeout or ban them altogether.
+     * If the user is currently banned, you cannot call this method to put them in a timeout instead.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:banned_users, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster whose chat room the user is being banned from.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param data          Required: Information on the user to ban or put in a timeout.
+     * @return BanUsersList
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_BANNED_USERS_MANAGE
+     */
+    @RequestLine("POST /moderation/bans?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    @Body("%7B\"data\":{data}%7D")
+    HystrixCommand<BanUsersList> banUser(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        @Param(value = "data", expander = ObjectToJsonExpander.class) BanUserInput data
+    );
+
+    /**
+     * Removes the ban or timeout that was placed on the specified user
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:banned_users, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster whose chat room the user is banned from chatting in.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param userId        Required: The ID of the user to remove the ban or timeout from.
+     * @return 204 No Content upon a successful unban or untimeout
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_BANNED_USERS_MANAGE
+     */
+    @RequestLine("DELETE /moderation/bans?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}&user_id={user_id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<Void> unbanUser(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        @Param("user_id") String userId
+    );
+
+    /**
+     * Gets the broadcaster’s list of non-private, blocked words or phrases.
+     * These are the terms that the broadcaster or moderator added manually, or that were denied by AutoMod.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:read:blocked_terms, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster whose blocked terms you’re getting.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param after         Optional: The cursor used to get the next page of results. The Pagination object in the response contains the cursor’s value.
+     * @param limit         Optional: The maximum number of blocked terms to return per page in the response. The minimum page size is 1 blocked term per page and the maximum is 100. The default is 20.
+     * @return BlockedTermList
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_BLOCKED_TERMS_READ
+     */
+    @RequestLine("GET /moderation/blocked_terms?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}&after={after}&first={first}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<BlockedTermList> getBlockedTerms(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        @Param("after") String after,
+        @Param("first") Integer limit
+    );
+
+    /**
+     * Adds a word or phrase to the broadcaster’s list of blocked terms.
+     * These are the terms that broadcasters don’t want used in their chat room.
+     * <p>
+     * The term must contain a minimum of 2 characters and may contain up to a maximum of 500 characters.
+     * <p>
+     * Terms can use a wildcard character ({@literal *}).
+     * The wildcard character must appear at the beginning or end of a word, or set of characters.
+     * For example, {@literal *foo or foo*}.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:blocked_terms, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster that owns the list of blocked terms.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param term          Required: The word or phrase to block from being used in the broadcaster’s chat room.
+     * @return BlockedTermList
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_BLOCKED_TERMS_MANAGE
+     */
+    @RequestLine("POST /moderation/blocked_terms?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}")
+    @Headers({
+        "Authorization: Bearer {token}",
+        "Content-Type: application/json"
+    })
+    @Body("%7B\"text\":\"{text}\"%7D")
+    HystrixCommand<BlockedTermList> addBlockedTerm(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        @Param(value = "text", expander = JsonStringExpander.class) String term
+    );
+
+    /**
+     * Removes the word or phrase that the broadcaster is blocking users from using in their chat room.
+     *
+     * @param authToken     Required: User access token (of the broadcaster or a moderator) with scope set to moderator:manage:blocked_terms, associated with moderatorId.
+     * @param broadcasterId Required: The ID of the broadcaster that owns the list of blocked terms.
+     * @param moderatorId   Required: The ID of a user that has permission to moderate the broadcaster’s chat room. Set this to the same value as broadcasterId if a broadcaster token is being used.
+     * @param blockedTermId Required: The ID of the blocked term you want to delete.
+     * @return 204 No Content upon a successful request
+     * @see com.github.twitch4j.auth.domain.TwitchScopes#HELIX_BLOCKED_TERMS_MANAGE
+     */
+    @RequestLine("DELETE /moderation/blocked_terms?broadcaster_id={broadcaster_id}&moderator_id={moderator_id}&id={id}")
+    @Headers("Authorization: Bearer {token}")
+    HystrixCommand<Void> removeBlockedTerm(
+        @Param("token") String authToken,
+        @Param("broadcaster_id") String broadcasterId,
+        @Param("moderator_id") String moderatorId,
+        @Param("id") String blockedTermId
     );
 
     /**
@@ -862,13 +1444,16 @@ public interface TwitchHelix {
     /**
      * Returns a list of moderators or users added and removed as moderators from a channel.
      *
-     * @param authToken User Token for the broadcaster
+     * @param authToken     User Token for the broadcaster
      * @param broadcasterId Provided broadcaster_id must match the user_id in the auth token.
-     * @param userIds Filters the results and only returns a status object for users who are moderators in this channel and have a matching user_id.
-     * @param after Cursor for forward pagination: tells the server where to start fetching the next set of results, in a multi-page response. The cursor value specified here is from the pagination response field of a prior query.
-     * @param limit Maximum number of objects to return. Maximum: 100. Default: 20.
+     * @param userIds       Filters the results and only returns a status object for users who are moderators in this channel and have a matching user_id.
+     * @param after         Cursor for forward pagination: tells the server where to start fetching the next set of results, in a multi-page response. The cursor value specified here is from the pagination response field of a prior query.
+     * @param limit         Maximum number of objects to return. Maximum: 100. Default: 20.
      * @return ModeratorList
+     * @see <a href="https://discuss.dev.twitch.tv/t/deprecation-of-twitch-api-event-endpoints-that-supported-websub-based-webhooks/35137">Deprecation announcement</a>
+     * @deprecated Will be removed come March 15, 2022, in favor of EventSub and {@link #getModerators(String, String, List, String, Integer)}
      */
+    @Deprecated
     @RequestLine(value = "GET /moderation/moderators/events?broadcaster_id={broadcaster_id}&user_id={user_id}&after={after}&first={first}", collectionFormat = CollectionFormat.CSV)
     @Headers("Authorization: Bearer {token}")
     HystrixCommand<ModeratorEventList> getModeratorEvents(
@@ -882,11 +1467,12 @@ public interface TwitchHelix {
     /**
      * Returns a list of moderators or users added and removed as moderators from a channel.
      *
-     * @param authToken User Token for the broadcaster
+     * @param authToken     User Token for the broadcaster
      * @param broadcasterId Provided broadcaster_id must match the user_id in the auth token.
-     * @param userIds Filters the results and only returns a status object for users who are moderators in this channel and have a matching user_id.
-     * @param after Cursor for forward pagination: tells the server where to start fetching the next set of results, in a multi-page response. The cursor value specified here is from the pagination response field of a prior query.
+     * @param userIds       Filters the results and only returns a status object for users who are moderators in this channel and have a matching user_id.
+     * @param after         Cursor for forward pagination: tells the server where to start fetching the next set of results, in a multi-page response. The cursor value specified here is from the pagination response field of a prior query.
      * @return ModeratorList
+     * @see <a href="https://discuss.dev.twitch.tv/t/deprecation-of-twitch-api-event-endpoints-that-supported-websub-based-webhooks/35137">Deprecation announcement</a>
      * @deprecated in favor of getModeratorEvents(String, String, List, String, Integer) where the last param is the number of objects to retrieve.
      */
     @Deprecated
@@ -1389,7 +1975,10 @@ public interface TwitchHelix {
      * @param after         Optional: Cursor for forward pagination; where to start fetching the next set of results in a multi-page response. This applies only to queries without user_id.
      * @param limit         Optional: Limit the number of items in the response payload. Maximum: 100.
      * @return SubscriptionEventList
+     * @see <a href="https://discuss.dev.twitch.tv/t/deprecation-of-twitch-api-event-endpoints-that-supported-websub-based-webhooks/35137">Deprecation announcement</a>
+     * @deprecated Will be removed come March 15, 2022, in favor of EventSub and {@link #getSubscriptions(String, String, String, String, Integer)}
      */
+    @Deprecated
     @RequestLine("GET /subscriptions/events?broadcaster_id={broadcaster_id}&id={id}&user_id={user_id}&after={after}&first={first}")
     @Headers("Authorization: Bearer {token}")
     HystrixCommand<SubscriptionEventList> getSubscriptionEvents(
@@ -1609,6 +2198,8 @@ public interface TwitchHelix {
      * <p>
      * Gets a list of all extensions (both active and inactive) for a specified user, identified by a Bearer token. The response has a JSON payload with a data field containing an array of user-information elements.
      * Required scope: user:read:broadcast
+     * <p>
+     * Note: inactive extensions are only returned if the token has the user:edit:broadcast scope - https://github.com/twitchdev/issues/issues/477
      *
      * @param authToken Auth Token
      * @return ExtensionList

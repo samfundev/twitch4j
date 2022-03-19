@@ -215,6 +215,11 @@ public interface ITwitchPubSub extends AutoCloseable {
     }
 
     @Unofficial
+    default PubSubSubscription listenForCreatorGoalsEvents(OAuth2Credential credential, String channelId) {
+        return listenOnTopic(PubSubType.LISTEN, credential, "creator-goals-events-v1." + channelId);
+    }
+
+    @Unofficial
     default PubSubSubscription listenForCrowdChantEvents(OAuth2Credential credential, String channelId) {
         return listenOnTopic(PubSubType.LISTEN, credential, "crowd-chant-channel-v1." + channelId);
     }
@@ -241,6 +246,11 @@ public interface ITwitchPubSub extends AutoCloseable {
     }
 
     @Unofficial
+    default PubSubSubscription listenForChannelBitsLeaderboardAllTimeEvents(OAuth2Credential credential, String channelId) {
+        return listenForChannelBitsLeaderboardEvents(credential, channelId, "ALLTIME");
+    }
+
+    @Unofficial
     default PubSubSubscription listenForChannelBitsLeaderboardEvents(OAuth2Credential credential, String channelId, String timeAggregationUnit) {
         return listenOnTopic(PubSubType.LISTEN, credential, "leaderboard-events-v1.bits-usage-by-channel-v1-" + channelId + "-" + timeAggregationUnit);
     }
@@ -262,6 +272,11 @@ public interface ITwitchPubSub extends AutoCloseable {
     }
 
     @Unofficial
+    default PubSubSubscription listenForChannelSubLeaderboardAllTimeEvents(OAuth2Credential credential, String channelId) {
+        return listenForChannelSubLeaderboardEvents(credential, channelId, "ALLTIME");
+    }
+
+    @Unofficial
     default PubSubSubscription listenForChannelSubLeaderboardEvents(OAuth2Credential credential, String channelId, String timeAggregationUnit) {
         return listenOnTopic(PubSubType.LISTEN, credential, "leaderboard-events-v1.sub-gifts-sent-" + channelId + "-" + timeAggregationUnit);
     }
@@ -274,6 +289,11 @@ public interface ITwitchPubSub extends AutoCloseable {
     @Unofficial
     default PubSubSubscription listenForLeaderboardMonthlyEvents(OAuth2Credential credential, String channelId) {
         return listenForLeaderboardEvents(credential, channelId, "MONTH");
+    }
+
+    @Unofficial
+    default PubSubSubscription listenForLeaderboardAllTimeEvents(OAuth2Credential credential, String channelId) {
+        return listenForLeaderboardEvents(credential,  channelId, "ALLTIME");
     }
 
     @Unofficial
@@ -386,7 +406,6 @@ public interface ITwitchPubSub extends AutoCloseable {
     }
 
     @Unofficial
-    @Deprecated
     default PubSubSubscription listenForUserChatroomEvents(OAuth2Credential credential, String userId) {
         return listenOnTopic(PubSubType.LISTEN, credential, "chatrooms-user-v1." + userId);
     }
@@ -442,6 +461,11 @@ public interface ITwitchPubSub extends AutoCloseable {
     @Unofficial
     default PubSubSubscription listenForFriendshipEvents(OAuth2Credential credential, String userId) {
         return listenOnTopic(PubSubType.LISTEN, credential, "friendship." + userId);
+    }
+
+    @Unofficial
+    default PubSubSubscription listenForLowTrustUsersEvents(OAuth2Credential credential, String userId, String channelId) {
+        return listenOnTopic(PubSubType.LISTEN, credential, "low-trust-users." + userId + "." + channelId);
     }
 
     @Unofficial

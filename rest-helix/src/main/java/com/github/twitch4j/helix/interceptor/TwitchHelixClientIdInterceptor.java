@@ -114,7 +114,7 @@ public class TwitchHelixClientIdInterceptor implements RequestInterceptor {
 
                 template.removeHeader(AUTH_HEADER);
                 template.header(AUTH_HEADER, BEARER_PREFIX + oauthToken);
-            } else {
+            } else if (!StringUtils.contains(oauthToken, '.')) {
                 OAuth2Credential verifiedCredential = accessTokenCache.getIfPresent(oauthToken);
                 if (verifiedCredential == null) {
                     log.debug("Getting matching client-id for authorization token {}", oauthToken.substring(0, 5));
@@ -135,7 +135,8 @@ public class TwitchHelixClientIdInterceptor implements RequestInterceptor {
         }
 
         // set headers
-        template.header("Client-Id", clientId);
+        if (!template.headers().containsKey("Client-Id"))
+            template.header("Client-Id", clientId);
         template.header("User-Agent", twitchAPIBuilder.getUserAgent());
     }
 
@@ -161,7 +162,7 @@ public class TwitchHelixClientIdInterceptor implements RequestInterceptor {
     }
 
     protected Bucket getOrInitializeBucket(String key) {
-        return buckets.get(key, k -> Bucket4j.builder().addLimit(DEFAULT_BANDWIDTH).build());
+        return buckets.get(key, k -> Bucket.builder().addLimit(DEFAULT_BANDWIDTH).build());
     }
 
     private OAuth2Credential getOrCreateAuthToken() {

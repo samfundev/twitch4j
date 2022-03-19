@@ -30,6 +30,7 @@ import org.apache.commons.lang3.StringUtils;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -139,6 +140,11 @@ public class TwitchPubSub implements ITwitchPubSub {
     private final Collection<String> botOwnerIds;
 
     /**
+     * WebSocket RFC Ping Period in ms (0 = disabled)
+     */
+    private final int wsPingPeriod;
+
+    /**
      * WebSocket Factory
      */
     protected final WebSocketFactory webSocketFactory;
@@ -176,11 +182,14 @@ public class TwitchPubSub implements ITwitchPubSub {
      * @param taskExecutor ScheduledThreadPoolExecutor
      * @param proxyConfig  ProxyConfig
      * @param botOwnerIds  Bot Owner IDs
+     * @param wsPingPeriod WebSocket Ping Period
      */
-    public TwitchPubSub(EventManager eventManager, ScheduledThreadPoolExecutor taskExecutor, ProxyConfig proxyConfig, Collection<String> botOwnerIds) {
+    public TwitchPubSub(EventManager eventManager, ScheduledThreadPoolExecutor taskExecutor, ProxyConfig proxyConfig, Collection<String> botOwnerIds, int wsPingPeriod) {
+        this.eventManager = eventManager;
         this.taskExecutor = taskExecutor;
         this.botOwnerIds = botOwnerIds;
-        this.eventManager = eventManager;
+        this.wsPingPeriod = wsPingPeriod;
+
         // register with serviceMediator
         this.eventManager.getServiceMediator().addService("twitch4j-pubsub", this);
 
@@ -338,6 +347,7 @@ public class TwitchPubSub implements ITwitchPubSub {
         try {
             // WebSocket
             this.webSocket = webSocketFactory.createSocket(WEB_SOCKET_SERVER);
+            this.webSocket.setPingInterval(wsPingPeriod);
 
             // WebSocket Listeners
             this.webSocket.clearListeners();
@@ -473,6 +483,9 @@ public class TwitchPubSub implements ITwitchPubSub {
                                         break;
                                 }
 
+                            } else if ("creator-goals-events-v1".equals(topicName)) {
+                                CreatorGoal creatorGoal = TypeConvert.convertValue(msgData.path("goal"), CreatorGoal.class);
+                                eventManager.publish(new CreatorGoalEvent(lastTopicIdentifier, type, creatorGoal));
                             } else if ("crowd-chant-channel-v1".equals(topicName)) {
                                 if ("crowd-chant-created".equals(type)) {
                                     CrowdChantCreatedEvent event = TypeConvert.convertValue(msgData, CrowdChantCreatedEvent.class);
@@ -512,6 +525,40 @@ public class TwitchPubSub implements ITwitchPubSub {
                                     case "deny_unban_request":
                                         ModeratorUnbanRequestAction unbanRequestAction = TypeConvert.convertValue(msgData, ModeratorUnbanRequestAction.class);
                                         eventManager.publish(new ModUnbanRequestActionEvent(lastTopicIdentifier, unbanRequestAction));
+                                        break;
+
+                                    case "moderator_added":
+                                    case "moderator_removed":
+                                    case "vip_added":
+                                    case "vip_removed":
+                                        ChatModerationAction.ModerationAction act = "moderator_added".equals(type) ? ChatModerationAction.ModerationAction.MOD
+                                            : "moderator_removed".equals(type) ? ChatModerationAction.ModerationAction.UNMOD
+                                            : "vip_added".equals(type) ? ChatModerationAction.ModerationAction.VIP
+                                            : ChatModerationAction.ModerationAction.UNVIP;
+
+                                        String targetUserId = msgData.path("target_user_id").asText();
+                                        String targetUserName = msgData.path("target_user_login").asText();
+                                        String createdByUserId = msgData.path("created_by_user_id").asText();
+                                        String createdBy = msgData.path("created_by").asText();
+                                        ChatModerationAction action = new ChatModerationAction("chat_login_moderation", act, Collections.singletonList(targetUserName), createdBy, createdByUserId, "", targetUserId, targetUserName, false);
+                                        eventManager.publish(new ChatModerationEvent(lastTopicIdentifier, action));
+                                        break;
+
+                                    default:
+                                        log.warn("Unparsable Message: " + message.getType() + "|" + message.getData());
+                                        break;
+                                }
+                            } else if ("chatrooms-user-v1".equals(topicName) && topicParts.length > 1) {
+                                final String userId = topicParts[1];
+                                switch (type) {
+                                    case "channel_banned_alias_restriction_update":
+                                        final AliasRestrictionUpdateData aliasData = TypeConvert.convertValue(msgData, AliasRestrictionUpdateData.class);
+                                        eventManager.publish(new AliasRestrictionUpdateEvent(userId, aliasData));
+                                        break;
+
+                                    case "user_moderation_action":
+                                        final UserModerationActionData actionData = TypeConvert.convertValue(msgData, UserModerationActionData.class);
+                                        eventManager.publish(new UserModerationActionEvent(userId, actionData));
                                         break;
 
                                     default:
@@ -577,6 +624,11 @@ public class TwitchPubSub implements ITwitchPubSub {
                                     case "reward-redeemed":
                                         final ChannelPointsRedemption redemption = TypeConvert.convertValue(msgData.path("redemption"), ChannelPointsRedemption.class);
                                         eventManager.publish(new RewardRedeemedEvent(Instant.parse(msgData.path("timestamp").asText()), redemption));
+                                        break;
+                                    case "community-goal-contribution":
+                                        CommunityGoalContribution goal = TypeConvert.convertValue(msgData.path("contribution"), CommunityGoalContribution.class);
+                                        Instant instant = Instant.parse(msgData.path("timestamp").textValue());
+                                        eventManager.publish(new UserCommunityGoalContributionEvent(lastTopicIdentifier, instant, goal));
                                         break;
                                     case "global-last-viewed-content-updated":
                                     case "channel-last-viewed-content-updated":
@@ -644,6 +696,16 @@ public class TwitchPubSub implements ITwitchPubSub {
                                 if ("cheerbomb".equalsIgnoreCase(type)) {
                                     CheerbombData cheerbomb = TypeConvert.convertValue(msgData, CheerbombData.class);
                                     eventManager.publish(new CheerbombEvent(lastTopicIdentifier, cheerbomb));
+                                } else {
+                                    log.warn("Unparsable Message: " + message.getType() + "|" + message.getData());
+                                }
+                            } else if ("low-trust-users".equals(topicName) && topicParts.length == 3) {
+                                String userId = topicParts[1];
+                                String channelId = topicParts[2];
+                                if ("low_trust_user_new_message".equals(type)) {
+                                    eventManager.publish(new LowTrustUserNewMessageEvent(userId, channelId, TypeConvert.convertValue(msgData, LowTrustUserNewMessage.class)));
+                                } else if ("low_trust_user_treatment_update".equals(type)) {
+                                    eventManager.publish(new LowTrustUserTreatmentUpdateEvent(userId, channelId, TypeConvert.convertValue(msgData, LowTrustUserTreatmentUpdate.class)));
                                 } else {
                                     log.warn("Unparsable Message: " + message.getType() + "|" + message.getData());
                                 }

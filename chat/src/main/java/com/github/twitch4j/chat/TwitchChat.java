@@ -1,18 +1,26 @@
 package com.github.twitch4j.chat;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
+import com.github.benmanes.caffeine.cache.Scheduler;
 import com.github.philippheuer.credentialmanager.CredentialManager;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.philippheuer.events4j.core.EventManager;
 import com.github.twitch4j.auth.providers.TwitchIdentityProvider;
 import com.github.twitch4j.chat.enums.CommandSource;
+import com.github.twitch4j.chat.enums.NoticeTag;
 import com.github.twitch4j.chat.enums.TMIConnectionState;
+import com.github.twitch4j.chat.events.AbstractChannelEvent;
 import com.github.twitch4j.chat.events.CommandEvent;
 import com.github.twitch4j.chat.events.IRCEventHandler;
 import com.github.twitch4j.chat.events.channel.ChannelMessageEvent;
+import com.github.twitch4j.chat.events.channel.ChannelNoticeEvent;
+import com.github.twitch4j.chat.events.channel.ChannelJoinFailureEvent;
+import com.github.twitch4j.chat.events.channel.ChannelStateEvent;
 import com.github.twitch4j.chat.events.channel.IRCMessageEvent;
-import com.github.twitch4j.common.annotation.Unofficial;
+import com.github.twitch4j.chat.events.channel.UserStateEvent;
 import com.github.twitch4j.common.config.ProxyConfig;
-import com.github.twitch4j.common.util.ChatReply;
 import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.common.util.EscapeUtils;
 import com.github.twitch4j.common.util.ExponentialBackoffStrategy;
@@ -30,7 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,7 +53,9 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 @Slf4j
 public class TwitchChat implements ITwitchChat {
@@ -138,6 +148,11 @@ public class TwitchChat implements ITwitchChat {
     protected final Bucket ircJoinBucket;
 
     /**
+     * IRC Auth Bucket
+     */
+    protected final Bucket ircAuthBucket;
+
+    /**
      * IRC Command Queue
      */
     protected final BlockingQueue<String> ircCommandQueue;
@@ -199,9 +214,42 @@ public class TwitchChat implements ITwitchChat {
     protected final boolean autoJoinOwnChannel;
 
     /**
+     * Whether join failures should result in removal from current channels
+     */
+    protected final boolean removeChannelOnJoinFailure;
+
+    /**
      * Whether JOIN/PART events should be enabled
      */
     protected final boolean enableMembershipEvents;
+
+    /**
+     * The maximum number of attempts to make for joining each channel
+     */
+    protected final int maxJoinRetries;
+
+    /**
+     * Minimum milliseconds to wait after a join attempt
+     */
+    protected final long chatJoinTimeout;
+
+    /**
+     * WebSocket RFC Ping Period in ms (0 = disabled)
+     */
+    private final int wsPingPeriod;
+
+    /**
+     * Tracks the timestamp of the last outbound ping
+     */
+    protected final AtomicLong lastPing = new AtomicLong();
+
+    @Getter
+    protected volatile long latency = -1L;
+
+    /**
+     * Cache of recent number of join attempts for each channel
+     */
+    protected final Cache<String, Integer> joinAttemptsByChannelName;
 
     /**
      * Helper class to compute delays between connection retries.
@@ -234,29 +282,39 @@ public class TwitchChat implements ITwitchChat {
      * @param ircMessageBucket               Bucket for chat
      * @param ircWhisperBucket               Bucket for whispers
      * @param ircJoinBucket                  Bucket for joins
+     * @param ircAuthBucket                  Bucket for auths
      * @param taskExecutor                   ScheduledThreadPoolExecutor
      * @param chatQueueTimeout               Timeout to wait for events in Chat Queue
      * @param proxyConfig                    Proxy Configuration
      * @param autoJoinOwnChannel             Whether one's own channel should automatically be joined
      * @param enableMembershipEvents         Whether JOIN/PART events should be enabled
      * @param botOwnerIds                    Bot Owner IDs
+     * @param removeChannelOnJoinFailure     Whether channels should be removed after a join failure
+     * @param maxJoinRetries                 Maximum join retries per channel
+     * @param chatJoinTimeout                Minimum milliseconds to wait after a join attempt
+     * @param wsPingPeriod                   WebSocket Ping Period
      */
-    public TwitchChat(EventManager eventManager, CredentialManager credentialManager, OAuth2Credential chatCredential, String baseUrl, boolean sendCredentialToThirdPartyHost, List<String> commandPrefixes, Integer chatQueueSize, Bucket ircMessageBucket, Bucket ircWhisperBucket, Bucket ircJoinBucket, ScheduledThreadPoolExecutor taskExecutor, long chatQueueTimeout, ProxyConfig proxyConfig, boolean autoJoinOwnChannel, boolean enableMembershipEvents, Collection<String> botOwnerIds) {
+    public TwitchChat(EventManager eventManager, CredentialManager credentialManager, OAuth2Credential chatCredential, String baseUrl, boolean sendCredentialToThirdPartyHost, Collection<String> commandPrefixes, Integer chatQueueSize, Bucket ircMessageBucket, Bucket ircWhisperBucket, Bucket ircJoinBucket, Bucket ircAuthBucket, ScheduledThreadPoolExecutor taskExecutor, long chatQueueTimeout, ProxyConfig proxyConfig, boolean autoJoinOwnChannel, boolean enableMembershipEvents, Collection<String> botOwnerIds, boolean removeChannelOnJoinFailure, int maxJoinRetries, long chatJoinTimeout, int wsPingPeriod) {
         this.eventManager = eventManager;
         this.credentialManager = credentialManager;
         this.chatCredential = chatCredential;
         this.baseUrl = baseUrl;
         this.sendCredentialToThirdPartyHost = sendCredentialToThirdPartyHost;
-        this.commandPrefixes = commandPrefixes;
+        this.commandPrefixes = new ArrayList<>(commandPrefixes);
         this.botOwnerIds = botOwnerIds;
         this.ircCommandQueue = new ArrayBlockingQueue<>(chatQueueSize, true);
         this.ircMessageBucket = ircMessageBucket;
         this.ircWhisperBucket = ircWhisperBucket;
         this.ircJoinBucket = ircJoinBucket;
+        this.ircAuthBucket = ircAuthBucket;
         this.taskExecutor = taskExecutor;
         this.chatQueueTimeout = chatQueueTimeout;
         this.autoJoinOwnChannel = autoJoinOwnChannel;
         this.enableMembershipEvents = enableMembershipEvents;
+        this.removeChannelOnJoinFailure = removeChannelOnJoinFailure;
+        this.maxJoinRetries = maxJoinRetries;
+        this.chatJoinTimeout = chatJoinTimeout;
+        this.wsPingPeriod = wsPingPeriod;
 
         // Create WebSocketFactory and apply proxy settings
         this.webSocketFactory = new WebSocketFactory();
@@ -297,7 +355,7 @@ public class TwitchChat implements ITwitchChat {
                 String command = null;
                 try {
                     // Send the command
-                    command = ircCommandQueue.poll(this.chatQueueTimeout, TimeUnit.MILLISECONDS);
+                    command = ircCommandQueue.poll();
                     if (command == null) break;
                     sendTextToWebSocket(command, false);
 
@@ -353,6 +411,49 @@ public class TwitchChat implements ITwitchChat {
                 }
             }
         });
+
+        // Initialize joinAttemptsByChannelName (on an attempt expiring without explicit removal, we retry with exponential backoff)
+        if (maxJoinRetries > 0) {
+            final long initialWait = Math.max(chatJoinTimeout, 0);
+            this.joinAttemptsByChannelName = Caffeine.newBuilder()
+                .expireAfterWrite(initialWait, TimeUnit.MILLISECONDS)
+                .scheduler(Scheduler.forScheduledExecutorService(taskExecutor)) // required for prompt removals on java 8
+                .<String, Integer>evictionListener((name, attempts, cause) -> {
+                    if (cause == RemovalCause.EXPIRED && name != null && attempts != null) {
+                        if (attempts < maxJoinRetries) {
+                            taskExecutor.schedule(() -> {
+                                if (currentChannels.contains(name)) {
+                                    issueJoin(name, attempts + 1);
+                                }
+                            }, initialWait * (1L << (Math.min(attempts, 16) + 1)), TimeUnit.MILLISECONDS); // exponential backoff (pow2 optimization)
+                        } else if (removeChannelOnJoinFailure && removeCurrentChannel(name)) {
+                            eventManager.publish(new ChannelJoinFailureEvent(name, ChannelJoinFailureEvent.Reason.RETRIES_EXHAUSTED));
+                        } else {
+                            log.warn("Chat connection exhausted retries when attempting to join channel: {}", name);
+                        }
+                    }
+                })
+                .build();
+        } else {
+            this.joinAttemptsByChannelName = Caffeine.newBuilder().maximumSize(0).build(); // optimization
+        }
+
+        // Remove successfully joined channels from joinAttemptsByChannelName (as further retries are not needed)
+        Consumer<AbstractChannelEvent> joinListener = e -> joinAttemptsByChannelName.invalidate(e.getChannel().getName().toLowerCase());
+        eventManager.onEvent(ChannelStateEvent.class, joinListener::accept);
+        eventManager.onEvent(ChannelNoticeEvent.class, joinListener::accept);
+        eventManager.onEvent(UserStateEvent.class, joinListener::accept);
+
+        // Ban Listener
+        final Set<NoticeTag> banNotices = EnumSet.of(NoticeTag.MSG_BANNED, NoticeTag.MSG_CHANNEL_SUSPENDED, NoticeTag.TOS_BAN); // bit vector
+        eventManager.onEvent(ChannelNoticeEvent.class, e -> {
+            String name = e.getChannel().getName();
+            NoticeTag type = e.getType();
+            if (removeChannelOnJoinFailure && banNotices.contains(type) && removeCurrentChannel(name)) {
+                ChannelJoinFailureEvent.Reason reason = type == NoticeTag.MSG_BANNED ? ChannelJoinFailureEvent.Reason.USER_BANNED : ChannelJoinFailureEvent.Reason.CHANNEL_SUSPENDED;
+                eventManager.publish(new ChannelJoinFailureEvent(name, reason));
+            }
+        });
     }
 
     /**
@@ -361,6 +462,11 @@ public class TwitchChat implements ITwitchChat {
     @Synchronized
     public void connect() {
         if (connectionState.equals(TMIConnectionState.DISCONNECTED) || connectionState.equals(TMIConnectionState.RECONNECTING)) {
+            if (chatCredential != null) {
+                // Wait for AUTH limit before opening the connection
+                ircAuthBucket.asBlocking().consumeUninterruptibly(1L);
+            }
+
             try {
                 // Change Connection State
                 connectionState = TMIConnectionState.CONNECTING;
@@ -421,6 +527,7 @@ public class TwitchChat implements ITwitchChat {
         try {
             // WebSocket
             this.webSocket = webSocketFactory.createSocket(this.baseUrl);
+            this.webSocket.setPingInterval(wsPingPeriod);
 
             // WebSocket Listeners
             this.webSocket.clearListeners();
@@ -477,21 +584,21 @@ public class TwitchChat implements ITwitchChat {
                                 // Handle messages
                                 log.trace("Received WebSocketMessage: " + message);
                                 // - CAP
-                                if (message.contains(":req Invalid CAP command")) {
+                                if (message.startsWith(":tmi.twitch.tv 410") || message.startsWith(":tmi.twitch.tv CAP * NAK")) {
                                     log.error("Failed to acquire requested IRC capabilities!");
                                 }
                                 // - CAP ACK
-                                else if (message.contains(":tmi.twitch.tv CAP * ACK :")) {
-                                    List<String> capabilities = Arrays.asList(message.replace(":tmi.twitch.tv CAP * ACK :", "").split(" "));
+                                else if (message.startsWith(":tmi.twitch.tv CAP * ACK :")) {
+                                    List<String> capabilities = Arrays.asList(message.substring(":tmi.twitch.tv CAP * ACK :".length()).split(" "));
                                     capabilities.forEach(cap -> log.debug("Acquired chat capability: " + cap));
                                 }
                                 // - Ping
-                                else if (message.contains("PING :tmi.twitch.tv")) {
+                                else if (message.equalsIgnoreCase("PING :tmi.twitch.tv")) {
                                     sendTextToWebSocket("PONG :tmi.twitch.tv", true);
                                     log.debug("Responding to PING request!");
                                 }
                                 // - Login failed.
-                                else if (message.equals(":tmi.twitch.tv NOTICE * :Login authentication failed")) {
+                                else if (message.equalsIgnoreCase(":tmi.twitch.tv NOTICE * :Login authentication failed")) {
                                     log.error("Invalid IRC Credentials. Login failed!");
                                 }
                                 // - Parse IRC Message
@@ -528,6 +635,22 @@ public class TwitchChat implements ITwitchChat {
                     }
                 }
 
+                @Override
+                public void onFrameSent(WebSocket websocket, WebSocketFrame frame) {
+                    if (frame != null && frame.isPingFrame()) {
+                        lastPing.compareAndSet(0L, System.currentTimeMillis());
+                    }
+                }
+
+                @Override
+                public void onPongFrame(WebSocket websocket, WebSocketFrame frame) {
+                    final long last = lastPing.getAndSet(0L);
+                    if (last > 0) {
+                        latency = System.currentTimeMillis() - last;
+                        log.trace("TwitchChat: Round-trip socket latency recorded at {} ms.", latency);
+                    }
+                }
+
             });
 
         } catch (Exception ex) {
@@ -551,7 +674,7 @@ public class TwitchChat implements ITwitchChat {
      * @param command raw irc command
      */
     public boolean sendRaw(String command) {
-        return ircMessageBucket.asAsyncScheduler().consume(1, taskExecutor).thenRunAsync(() -> queueCommand(command), taskExecutor) != null;
+        return ircMessageBucket.asScheduler().consume(1, taskExecutor).thenRunAsync(() -> queueCommand(command), taskExecutor) != null;
     }
 
     /**
@@ -623,8 +746,16 @@ public class TwitchChat implements ITwitchChat {
     }
 
     private void issueJoin(String channelName) {
-        ircJoinBucket.asAsyncScheduler().consume(1, taskExecutor).thenRunAsync(
-            () -> queueCommand("JOIN #" + channelName.toLowerCase()),
+        this.issueJoin(channelName, 0);
+    }
+
+    protected void issueJoin(String channelName, int attempts) {
+        ircJoinBucket.asScheduler().consume(1, taskExecutor).thenRunAsync(
+            () -> {
+                String name = channelName.toLowerCase();
+                queueCommand("JOIN #" + name);
+                joinAttemptsByChannelName.asMap().merge(name, attempts, Math::max); // mark that a join has been initiated to track later success or failure state
+            },
             taskExecutor
         );
     }
@@ -659,14 +790,29 @@ public class TwitchChat implements ITwitchChat {
     }
 
     private void issuePart(String channelName) {
-        ircJoinBucket.asAsyncScheduler().consume(1, taskExecutor).thenRunAsync(
+        ircJoinBucket.asScheduler().consume(1, taskExecutor).thenRunAsync(
             () -> queueCommand("PART #" + channelName.toLowerCase()),
             taskExecutor
         );
     }
 
+    private boolean removeCurrentChannel(String channelName) {
+        channelCacheLock.lock();
+        try {
+            if (currentChannels.remove(channelName)) {
+                String id = channelNameToChannelId.remove(channelName);
+                if (id != null) channelIdToChannelName.remove(id);
+                return true;
+            } else {
+                return false;
+            }
+        } finally {
+            channelCacheLock.unlock();
+        }
+    }
+
     @Override
-    public boolean sendMessage(String channel, String message, @Unofficial Map<String, Object> tags) {
+    public boolean sendMessage(String channel, String message, Map<String, Object> tags) {
         StringBuilder sb = new StringBuilder();
         if (tags != null && !tags.isEmpty()) {
             sb.append('@');
@@ -687,7 +833,7 @@ public class TwitchChat implements ITwitchChat {
      */
     public void sendPrivateMessage(String targetUser, String message) {
         log.debug("Adding private message for user [{}] with content [{}] to the queue.", targetUser, message);
-        ircWhisperBucket.asAsyncScheduler().consume(1, taskExecutor).thenRunAsync(
+        ircWhisperBucket.asScheduler().consume(1, taskExecutor).thenRunAsync(
             () -> queueCommand(String.format("PRIVMSG #%s :/w %s %s", chatCredential.getUserName().toLowerCase(), targetUser, message)),
             taskExecutor
         );

@@ -16,12 +16,21 @@ dependencies {
 	// Websocket (for common proxy settings)
 	compileOnly(group = "com.neovisionaries", name = "nv-websocket-client")
 
+	// Rate-limit buckets for registry
+	compileOnly(group = "com.github.vladimir-bukhtoyarov", name = "bucket4j-core")
+
 	// Twitch4J Modules
-	api(project(":auth"))
+	api(project(":twitch4j-auth"))
+}
+
+tasks.javadoc {
+	options {
+		title = "Twitch4J (v${version}) - Common Module API"
+		windowTitle = "Twitch4J (v${version}) - Common Module API"
+	}
 }
 
 publishing.publications.withType<MavenPublication> {
-	artifactId = "twitch4j-common"
 	pom {
 		name.set("Twitch4J API - Common Module")
 		description.set("Common API dependency")

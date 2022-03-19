@@ -15,6 +15,9 @@ public class SubscriptionTypes {
     public final ChannelBanType CHANNEL_BAN;
     public final ChannelCheerType CHANNEL_CHEER;
     public final ChannelFollowType CHANNEL_FOLLOW;
+    public final ChannelGoalBeginType CHANNEL_GOAL_BEGIN;
+    public final ChannelGoalProgressType CHANNEL_GOAL_PROGRESS;
+    public final ChannelGoalEndType CHANNEL_GOAL_END;
     public final ChannelModeratorAddType CHANNEL_MODERATOR_ADD;
     public final ChannelModeratorRemoveType CHANNEL_MODERATOR_REMOVE;
     public final ChannelPointsCustomRewardAddType CHANNEL_POINTS_CUSTOM_REWARD_ADD;
@@ -29,7 +32,8 @@ public class SubscriptionTypes {
     public final ChannelSubscriptionMessageType CHANNEL_SUBSCRIPTION_MESSAGE;
     public final ChannelUnbanType CHANNEL_UNBAN;
     public final ChannelUpdateType CHANNEL_UPDATE;
-    @Unofficial public final BetaExtensionBitsTransactionCreateType BETA_EXTENSION_BITS_TRANSACTION_CREATE;
+    public final DropEntitlementGrantType DROP_ENTITLEMENT_GRANT;
+    public final ExtensionBitsTransactionCreateType EXTENSION_BITS_TRANSACTION_CREATE;
     public final HypeTrainBeginType HYPE_TRAIN_BEGIN;
     public final HypeTrainEndType HYPE_TRAIN_END;
     public final HypeTrainProgressType HYPE_TRAIN_PROGRESS;
@@ -56,6 +60,9 @@ public class SubscriptionTypes {
                 CHANNEL_BAN = new ChannelBanType(),
                 CHANNEL_CHEER = new ChannelCheerType(),
                 CHANNEL_FOLLOW = new ChannelFollowType(),
+                CHANNEL_GOAL_BEGIN = new ChannelGoalBeginType(),
+                CHANNEL_GOAL_PROGRESS = new ChannelGoalProgressType(),
+                CHANNEL_GOAL_END = new ChannelGoalEndType(),
                 CHANNEL_MODERATOR_ADD = new ChannelModeratorAddType(),
                 CHANNEL_MODERATOR_REMOVE = new ChannelModeratorRemoveType(),
                 CHANNEL_POINTS_CUSTOM_REWARD_ADD = new ChannelPointsCustomRewardAddType(),
@@ -70,7 +77,8 @@ public class SubscriptionTypes {
                 CHANNEL_SUBSCRIPTION_MESSAGE = new ChannelSubscriptionMessageType(),
                 CHANNEL_UNBAN = new ChannelUnbanType(),
                 CHANNEL_UPDATE = new ChannelUpdateType(),
-                BETA_EXTENSION_BITS_TRANSACTION_CREATE = new BetaExtensionBitsTransactionCreateType(),
+                DROP_ENTITLEMENT_GRANT = new DropEntitlementGrantType(),
+                EXTENSION_BITS_TRANSACTION_CREATE = new ExtensionBitsTransactionCreateType(),
                 HYPE_TRAIN_BEGIN = new HypeTrainBeginType(),
                 HYPE_TRAIN_END = new HypeTrainEndType(),
                 HYPE_TRAIN_PROGRESS = new HypeTrainProgressType(),
