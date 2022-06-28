@@ -14,6 +14,9 @@ dependencies {
 
 	// Jackson
 	api(group = "com.fasterxml.jackson.core", name = "jackson-databind")
+
+	// Metrics
+	api("io.micrometer:micrometer-core")
 }
 
 base {

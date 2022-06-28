@@ -33,6 +33,8 @@ import com.github.twitch4j.tmi.TwitchMessagingInterface;
 import com.github.twitch4j.tmi.TwitchMessagingInterfaceBuilder;
 import feign.Logger;
 import io.github.bucket4j.Bandwidth;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.composite.CompositeMeterRegistry;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -171,6 +173,9 @@ public class TwitchClientPoolBuilder {
      */
     @With
     private OAuth2Credential chatAccount;
+
+    @With
+    private MeterRegistry meterRegistry = new CompositeMeterRegistry();
 
     /**
      * EventManager
@@ -383,6 +388,7 @@ public class TwitchClientPoolBuilder {
         TwitchExtensions extensions = null;
         if (this.enableExtensions) {
             extensions = TwitchExtensionsBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withClientId(clientId)
                 .withClientSecret(clientSecret)
                 .withUserAgent(userAgent)
@@ -397,6 +403,7 @@ public class TwitchClientPoolBuilder {
         TwitchHelix helix = null;
         if (this.enableHelix) {
             helix = TwitchHelixBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withBaseUrl(helixBaseUrl)
                 .withClientId(clientId)
                 .withClientSecret(clientSecret)
@@ -413,6 +420,7 @@ public class TwitchClientPoolBuilder {
         TwitchKraken kraken = null;
         if (this.enableKraken) {
             kraken = TwitchKrakenBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withClientId(clientId)
                 .withClientSecret(clientSecret)
                 .withUserAgent(userAgent)
@@ -427,6 +435,7 @@ public class TwitchClientPoolBuilder {
         TwitchMessagingInterface tmi = null;
         if (this.enableTMI) {
             tmi = TwitchMessagingInterfaceBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withClientId(clientId)
                 .withClientSecret(clientSecret)
                 .withUserAgent(userAgent)
@@ -452,7 +461,9 @@ public class TwitchClientPoolBuilder {
                 .proxyConfig(() -> proxyConfig)
                 .maxSubscriptionsPerConnection(maxChannelsPerChatInstance)
                 .advancedConfiguration(builder ->
-                    builder.withCredentialManager(credentialManager)
+                    builder
+                        .withMeterRegistry(meterRegistry)
+                        .withCredentialManager(credentialManager)
                         .withChatQueueSize(chatQueueSize)
                         .withBaseUrl(chatServer)
                         .withChatQueueTimeout(chatQueueTimeout)
@@ -464,6 +475,7 @@ public class TwitchClientPoolBuilder {
                 .build();
         } else if (this.enableChat) {
             chat = TwitchChatBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withEventManager(eventManager)
                 .withCredentialManager(credentialManager)
                 .withChatAccount(chatAccount)
@@ -491,10 +503,16 @@ public class TwitchClientPoolBuilder {
                 .eventManager(eventManager)
                 .executor(() -> scheduledThreadPoolExecutor)
                 .proxyConfig(() -> proxyConfig)
-                .advancedConfiguration(builder -> builder.withWsPingPeriod(wsPingPeriod).setBotOwnerIds(botOwnerIds))
+                .advancedConfiguration(builder ->
+                    builder
+                        .withMeterRegistry(meterRegistry)
+                        .withWsPingPeriod(wsPingPeriod)
+                        .setBotOwnerIds(botOwnerIds)
+                )
                 .build();
         } else if (this.enablePubSub) {
             pubSub = TwitchPubSubBuilder.builder()
+                .withMeterRegistry(meterRegistry)
                 .withEventManager(eventManager)
                 .withScheduledThreadPoolExecutor(scheduledThreadPoolExecutor)
                 .withProxyConfig(proxyConfig)

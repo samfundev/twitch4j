@@ -6,6 +6,9 @@ dependencies {
 	// Cache
 	api(group = "com.github.ben-manes.caffeine", name = "caffeine")
 
+	// Metrics
+	api("io.micrometer:micrometer-core")
+
 	// Twitch4J Modules
 	api(project(":twitch4j-common"))
 	api(project(":twitch4j-auth"))
