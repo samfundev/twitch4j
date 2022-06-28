@@ -4,13 +4,16 @@ import com.github.twitch4j.client.websocket.domain.WebsocketConnectionState;
 import com.github.twitch4j.common.util.ExponentialBackoffStrategy;
 import com.neovisionaries.ws.client.WebSocket;
 import com.neovisionaries.ws.client.WebSocketAdapter;
+import com.neovisionaries.ws.client.WebSocketException;
 import com.neovisionaries.ws.client.WebSocketFactory;
 import com.neovisionaries.ws.client.WebSocketFrame;
+import io.micrometer.core.instrument.Tag;
 import lombok.Getter;
 import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -83,6 +86,8 @@ public class WebsocketConnection implements AutoCloseable {
         webSocketAdapter = new WebSocketAdapter() {
             @Override
             public void onConnected(WebSocket ws, Map<String, List<String>> headers) {
+                config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "connected"))).increment();
+
                 // hook: on connected
                 config.onConnected().run();
 
@@ -104,6 +109,7 @@ public class WebsocketConnection implements AutoCloseable {
             public void onDisconnected(WebSocket websocket, WebSocketFrame serverCloseFrame, WebSocketFrame clientCloseFrame, boolean closedByServer) {
                 if (!connectionState.equals(WebsocketConnectionState.DISCONNECTING)) {
                     log.info("Connection to WebSocket [{}] lost! Retrying soon ...", config.baseUrl());
+                    config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "connection-lost"))).increment();
 
                     // connection lost - reconnecting
                     if (backoffClearer != null) backoffClearer.cancel(false);
@@ -122,6 +128,8 @@ public class WebsocketConnection implements AutoCloseable {
 
             @Override
             public void onFrameSent(WebSocket websocket, WebSocketFrame frame) {
+                config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "frame-sent"), Tag.of("opcode", String.valueOf(frame.getOpcode())))).increment();
+
                 if (frame != null && frame.isPingFrame()) {
                     lastPing.compareAndSet(0L, System.currentTimeMillis());
                 }
@@ -134,6 +142,21 @@ public class WebsocketConnection implements AutoCloseable {
                     latency = System.currentTimeMillis() - last;
                     log.trace("T4J Websocket: Round-trip socket latency recorded at {} ms.", latency);
                 }
+            }
+
+            @Override
+            public void onError(WebSocket websocket, WebSocketException cause) throws Exception {
+                config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "error"), Tag.of("error", cause.getMessage()))).increment();
+            }
+
+            @Override
+            public void onFrame(WebSocket websocket, WebSocketFrame frame) throws Exception {
+                config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "frame"), Tag.of("opcode", String.valueOf(frame.getOpcode())))).increment();
+            }
+
+            @Override
+            public void onSendingFrame(WebSocket websocket, WebSocketFrame frame) throws Exception {
+                config.meterRegistry().counter("websocket_event", Arrays.asList(Tag.of("connection", config.instanceId()), Tag.of("type", "frame-sending"), Tag.of("opcode", String.valueOf(frame.getOpcode())))).increment();
             }
         };
     }
@@ -241,7 +264,6 @@ public class WebsocketConnection implements AutoCloseable {
         }
 
         this.webSocket.sendText(message);
-
         return true;
     }
 
