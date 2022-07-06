@@ -155,15 +155,13 @@ subprojects {
 		}
 		publications {
 			create<MavenPublication>("main") {
+				groupId = "com.github.twitch4j"
+				version = "1.10.0"
+
 				from(components["java"])
 				pom.default()
 			}
 		}
-	}
-
-	signing {
-		useGpgCmd()
-		sign(publishing.publications["main"])
 	}
 
 	// Source encoding
