@@ -13,7 +13,7 @@ dependencies {
 	api(group = "com.netflix.hystrix", name = "hystrix-core")
 
 	// Caching
-	api(group = "com.github.ben-manes.caffeine", name = "caffeine")
+	api(group = "com.google.guava", name = "guava")
 
 	// Twitch4J Modules
 	api(project(":twitch4j-common"))

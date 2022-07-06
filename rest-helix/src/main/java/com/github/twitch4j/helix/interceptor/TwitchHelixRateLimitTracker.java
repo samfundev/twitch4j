@@ -1,10 +1,11 @@
 package com.github.twitch4j.helix.interceptor;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.twitch4j.common.annotation.Unofficial;
 import com.github.twitch4j.common.util.BucketUtils;
+import com.github.twitch4j.common.util.CacheUtils;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import lombok.RequiredArgsConstructor;
@@ -40,28 +41,28 @@ public final class TwitchHelixRateLimitTracker {
     /**
      * Rate limit buckets by user/app
      */
-    private final Cache<String, Bucket> primaryBuckets = Caffeine.newBuilder()
+    private final Cache<String, Bucket> primaryBuckets = CacheBuilder.newBuilder()
         .expireAfterAccess(1, TimeUnit.MINUTES)
         .build();
 
     /**
      * Moderation API: ban and unban rate limit buckets per channel
      */
-    private final Cache<String, Bucket> bansByChannelId = Caffeine.newBuilder()
+    private final Cache<String, Bucket> bansByChannelId = CacheBuilder.newBuilder()
         .expireAfterAccess(1, TimeUnit.MINUTES)
         .build();
 
     /**
      * Create Clip API rate limit buckets per user
      */
-    private final Cache<String, Bucket> clipsByUserId = Caffeine.newBuilder()
+    private final Cache<String, Bucket> clipsByUserId = CacheBuilder.newBuilder()
         .expireAfterAccess(1, TimeUnit.MINUTES)
         .build();
 
     /**
      * Moderation API: add and remove blocked term rate limit buckets per channel
      */
-    private final Cache<String, Bucket> termsByChannelId = Caffeine.newBuilder()
+    private final Cache<String, Bucket> termsByChannelId = CacheBuilder.newBuilder()
         .expireAfterAccess(1, TimeUnit.MINUTES)
         .build();
 
@@ -81,7 +82,7 @@ public final class TwitchHelixRateLimitTracker {
 
     @NotNull
     Bucket getOrInitializeBucket(@NotNull String key) {
-        return primaryBuckets.get(key, k -> BucketUtils.createBucket(this.apiRateLimit));
+        return CacheUtils.getSafe(primaryBuckets, key, k -> BucketUtils.createBucket(this.apiRateLimit));
     }
 
     @NotNull
@@ -101,19 +102,19 @@ public final class TwitchHelixRateLimitTracker {
     @NotNull
     @Unofficial
     Bucket getModerationBucket(@NotNull String channelId) {
-        return bansByChannelId.get(channelId, k -> BucketUtils.createBucket(BANS_BANDWIDTH));
+        return CacheUtils.getSafe(bansByChannelId, channelId, k -> BucketUtils.createBucket(BANS_BANDWIDTH));
     }
 
     @NotNull
     @Unofficial
     Bucket getClipBucket(@NotNull String userId) {
-        return clipsByUserId.get(userId, k -> BucketUtils.createBucket(CLIPS_BANDWIDTH));
+        return CacheUtils.getSafe(clipsByUserId, userId, k -> BucketUtils.createBucket(CLIPS_BANDWIDTH));
     }
 
     @NotNull
     @Unofficial
     Bucket getTermsBucket(@NotNull String channelId) {
-        return termsByChannelId.get(channelId, k -> BucketUtils.createBucket(TERMS_BANDWIDTH));
+        return CacheUtils.getSafe(termsByChannelId, channelId, k -> BucketUtils.createBucket(TERMS_BANDWIDTH));
     }
 
     /*

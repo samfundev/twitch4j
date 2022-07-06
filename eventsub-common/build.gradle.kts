@@ -4,8 +4,8 @@ dependencies {
 	api(group = "com.fasterxml.jackson.core", name = "jackson-databind")
 	api(group = "com.fasterxml.jackson.datatype", name = "jackson-datatype-jsr310")
 
-	// Cache
-	api(group = "com.github.ben-manes.caffeine", name = "caffeine")
+	// Guava
+	api(group = "com.google.guava", name = "guava")
 
 	// Twitch4J Modules
 	api(project(":twitch4j-common"))

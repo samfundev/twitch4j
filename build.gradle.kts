@@ -24,7 +24,7 @@ allprojects {
 				this as StandardJavadocDocletOptions
 				links(
 					"https://javadoc.io/doc/org.jetbrains/annotations/23.0.0",
-					"https://javadoc.io/doc/com.github.ben-manes.caffeine/caffeine/2.9.3",
+					"https://javadoc.io/doc/com.google.guava/guava/31.0-android/",
 					"https://javadoc.io/doc/commons-configuration/commons-configuration/1.10",
 					"https://javadoc.io/doc/com.github.vladimir-bukhtoyarov/bucket4j-core/7.5.0",
 					// "https://javadoc.io/doc/com.squareup.okhttp3/okhttp/4.9.3", // blocked by https://github.com/square/okhttp/issues/6450
@@ -79,8 +79,8 @@ subprojects {
 			// Annotations
 			api(group = "org.jetbrains", name = "annotations", version = "23.0.0")
 
-			// Caching
-			api(group = "com.github.ben-manes.caffeine", name = "caffeine", version = "2.9.3")
+			// Guava
+			api(group = "com.google.guava", name = "guava", version = "31.0.1-android")
 
 			// Apache Commons
 			api(group = "commons-configuration", name = "commons-configuration", version = "1.10")

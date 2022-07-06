@@ -9,8 +9,8 @@ dependencies {
 			api(it)
 		}
 
-	// Cache
-	api(group = "com.github.ben-manes.caffeine", name = "caffeine")
+	// Guava
+	api(group = "com.google.guava", name = "guava")
 
 	// Jackson
 	api(group = "com.fasterxml.jackson.core", name = "jackson-databind")

@@ -1,8 +1,8 @@
 package com.github.twitch4j.eventsub.util;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.twitch4j.common.util.CryptoUtils;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -16,6 +16,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @UtilityClass
@@ -31,7 +32,7 @@ public class EventSubVerifier {
     /**
      * The Twitch-Eventsub-Message-Id's that have been observed during {@link #RECENT_EVENT}
      */
-    private final Cache<String, Boolean> RECENT_MESSAGE_IDS = Caffeine.newBuilder().expireAfterWrite(RECENT_EVENT).build();
+    private final Cache<String, Boolean> RECENT_MESSAGE_IDS = CacheBuilder.newBuilder().expireAfterWrite(RECENT_EVENT.toMillis(), TimeUnit.MILLISECONDS).build();
 
     /**
      * Twitch's prefix for Twitch-Eventsub-Message-Signature

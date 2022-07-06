@@ -1,9 +1,9 @@
 package com.github.twitch4j.helix.interceptor;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.twitch4j.auth.providers.TwitchIdentityProvider;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -21,7 +21,7 @@ public final class TwitchHelixTokenManager {
     /**
      * Access token cache
      */
-    private final Cache<String, OAuth2Credential> accessTokenCache = Caffeine.newBuilder()
+    private final Cache<String, OAuth2Credential> accessTokenCache = CacheBuilder.newBuilder()
         .expireAfterAccess(15, TimeUnit.MINUTES)
         .maximumSize(10_000)
         .build();

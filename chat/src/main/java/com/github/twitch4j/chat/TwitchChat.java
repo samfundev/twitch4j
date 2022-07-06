@@ -1,9 +1,5 @@
 package com.github.twitch4j.chat;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
-import com.github.benmanes.caffeine.cache.Scheduler;
 import com.github.philippheuer.credentialmanager.CredentialManager;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.philippheuer.events4j.core.EventManager;
@@ -24,9 +20,13 @@ import com.github.twitch4j.client.websocket.WebsocketConnection;
 import com.github.twitch4j.client.websocket.domain.WebsocketConnectionState;
 import com.github.twitch4j.common.config.ProxyConfig;
 import com.github.twitch4j.common.util.BucketUtils;
+import com.github.twitch4j.common.util.CacheUtils;
 import com.github.twitch4j.common.util.CryptoUtils;
 import com.github.twitch4j.common.util.EscapeUtils;
 import com.github.twitch4j.util.IBackoffStrategy;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.RemovalCause;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import lombok.Getter;
@@ -279,7 +279,7 @@ public class TwitchChat implements ITwitchChat {
         this.perChannelRateLimit = perChannelRateLimit;
 
         // init per channel message buckets by channel name
-        this.bucketByChannelName = Caffeine.newBuilder()
+        this.bucketByChannelName = CacheBuilder.newBuilder()
             .expireAfterAccess(Math.max(perChannelRateLimit.getRefillPeriodNanos(), Duration.ofSeconds(30L).toNanos()), TimeUnit.NANOSECONDS)
             .build();
 
@@ -394,11 +394,12 @@ public class TwitchChat implements ITwitchChat {
         // Initialize joinAttemptsByChannelName (on an attempt expiring without explicit removal, we retry with exponential backoff)
         if (maxJoinRetries > 0) {
             final long initialWait = Math.max(chatJoinTimeout, 0);
-            this.joinAttemptsByChannelName = Caffeine.newBuilder()
+            this.joinAttemptsByChannelName = CacheBuilder.newBuilder()
                 .expireAfterWrite(initialWait, TimeUnit.MILLISECONDS)
-                .scheduler(Scheduler.forScheduledExecutorService(taskExecutor)) // required for prompt removals on java 8
-                .<String, Integer>evictionListener((name, attempts, cause) -> {
-                    if (cause == RemovalCause.EXPIRED && name != null && attempts != null) {
+                .<String, Integer>removalListener((removal) -> {
+                    String name = removal.getKey();
+                    Integer attempts = removal.getValue();
+                    if (removal.getCause() == RemovalCause.EXPIRED && name != null && attempts != null) {
                         if (attempts < maxJoinRetries) {
                             taskExecutor.schedule(() -> {
                                 if (currentChannels.contains(name)) {
@@ -413,8 +414,10 @@ public class TwitchChat implements ITwitchChat {
                     }
                 })
                 .build();
+
+                taskExecutor.scheduleAtFixedRate(() -> joinAttemptsByChannelName.cleanUp(), 0, initialWait, TimeUnit.MILLISECONDS);
         } else {
-            this.joinAttemptsByChannelName = Caffeine.newBuilder().maximumSize(0).build(); // optimization
+            this.joinAttemptsByChannelName = CacheBuilder.newBuilder().maximumSize(0).build(); // optimization
         }
 
         // Remove successfully joined channels from joinAttemptsByChannelName (as further retries are not needed)
@@ -835,7 +838,7 @@ public class TwitchChat implements ITwitchChat {
     }
 
     private Bucket getChannelMessageBucket(@NotNull String channelName) {
-        return bucketByChannelName.get(channelName.toLowerCase(), k -> BucketUtils.createBucket(perChannelRateLimit));
+        return CacheUtils.getSafe(bucketByChannelName, channelName.toLowerCase(), k -> BucketUtils.createBucket(perChannelRateLimit));
     }
 
 }

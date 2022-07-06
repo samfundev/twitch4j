@@ -2,12 +2,11 @@ package com.github.twitch4j.graphql;
 
 import com.apollographql.apollo.ApolloClient;
 import com.apollographql.apollo.internal.batch.BatchConfig;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.philippheuer.credentialmanager.domain.OAuth2Credential;
 import com.github.philippheuer.events4j.core.EventManager;
 import com.github.twitch4j.common.annotation.Unofficial;
 import com.github.twitch4j.common.config.ProxyConfig;
+import com.github.twitch4j.common.util.CacheUtils;
 import com.github.twitch4j.graphql.command.*;
 import com.github.twitch4j.graphql.internal.type.CommunityPointsCustomRewardRedemptionStatus;
 import com.github.twitch4j.graphql.internal.type.CreateCommunityPointsCommunityGoalInput;
@@ -16,6 +15,8 @@ import com.github.twitch4j.graphql.internal.type.CreatePredictionEventInput;
 import com.github.twitch4j.graphql.internal.type.UnbanRequestStatus;
 import com.github.twitch4j.graphql.internal.type.UnbanRequestsSortOrder;
 import com.github.twitch4j.graphql.internal.type.UpdateCommunityPointsCommunityGoalInput;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -97,7 +98,7 @@ public class TwitchGraphQL {
         this.proxyConfig = proxyConfig;
         this.batchingEnabled = batchingEnabled;
         this.timeout = timeout;
-        this.clientsByCredential = Caffeine.newBuilder().expireAfterAccess(5, TimeUnit.MINUTES).build();
+        this.clientsByCredential = CacheBuilder.newBuilder().expireAfterAccess(5, TimeUnit.MINUTES).build();
     }
 
     /**
@@ -109,7 +110,7 @@ public class TwitchGraphQL {
     private ApolloClient getApolloClient(OAuth2Credential credential) {
         if (credential == null) credential = defaultToken;
         final String accessToken = credential != null && credential.getAccessToken() != null ? credential.getAccessToken() : "";
-        return clientsByCredential.get(accessToken, s -> {
+        return CacheUtils.getSafe(clientsByCredential, accessToken, s -> {
             // Http Client
             OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                 .callTimeout(timeout, TimeUnit.MILLISECONDS)
